@@ -47,7 +47,7 @@ Con `claude mcp list` deberías ver `storyboard: … ✔ Connected`. Para Claude
 | «Un storyboard en PDF A4 con notas de cada plano» | `… "panels": [{"shot": "PG", "action": "…"}, …], "layout": {"template": "storyboard", "page": "A4"}, "output": {"format": "pdf"}` |
 | «Las fotos de esta carpeta, sin las movidas» | `make_storyboard {"input": {"folder": "/…/fotos"}, "select": {"drop_blurriest_pct": 20}}` |
 | «Divídelo en planos y dime cuánto dura cada uno» | `make_storyboard {"input": {"video": "/…"}, "select": {"mode": "shots"}, "output": {"shot_list": ["csv"]}}` |
-| «Hazme un GIF en el que se mueva cada viñeta» | `… "select": {"count": 6}, "output": {"format": "gif"}` |
+| «Hazme un GIF ligero en el que se mueva cada viñeta» | `… "select": {"count": 6}, "layout": {"columns": 3}, "output": {"format": "gif", "animation": {"max_side": 640, "fps": 8}}` |
 | «Una animática del storyboard, con un fundido al final» | `… "panels": [{"duration_s": 3}, …, {"transition": "fundido a negro"}], "output": {"format": "mp4", "animation": {"kind": "animatic"}}` |
 | «Los colores de cada plano» | `… "select": {"mode": "shots"}, "output": {"color_script": true}` |
 | «Una presentación de estas fotos, 3 s cada una, con encadenados» | `make_storyboard {"input": {"folder": "/…/fotos"}, "output": {"format": "webp", "animation": {"panel_s": 3, "transition": "dissolve"}}}` |
@@ -62,9 +62,9 @@ Con `claude mcp list` deberías ver `storyboard: … ✔ Connected`. Para Claude
 | Herramienta | Qué hace | Escribe | Devuelve |
 |---|---|---|---|
 | `media_info` | Dice qué es la entrada: duración, fps, nº de fotogramas, tamaño y rotación del vídeo, o nombre, formato y tamaño de cada imagen. Es rápida. | nada | JSON |
-| `make_storyboard` | Páginas de viñetas: `grid`, `storyboard`, `list` o `strip`; un vídeo con ellas (mosaico o animática). | PNG, JPG o PDF; o MP4, WebM, GIF o WebP con la hoja en PNG y fotogramas de muestra; opcionalmente, la lista de planos (JSON, CSV), el guion de color y los fotogramas a tamaño completo | JSON con las rutas y una entrada por viñeta, más una **vista previa** de la página 1 (y, con vídeo, de los fotogramas de muestra) |
+| `make_storyboard` | Páginas de viñetas: `grid`, `storyboard`, `list` o `strip`; un vídeo con ellas (mosaico o animática). | PNG, JPG o PDF; o MP4, WebM, GIF o WebP con la hoja en PNG y fotogramas de muestra; opcionalmente, la lista de planos (JSON, CSV), el guion de color y los fotogramas a tamaño completo | JSON con las rutas y una entrada por viñeta, más una **vista previa** de la página 1 (y, con formato animado, de los fotogramas de muestra; con guion de color, de la tira) |
 | `extract_frames` | Fotogramas elegidos a tamaño completo, o copias de las imágenes elegidas. | `f00042.jpg`… o `001_<nombre>` | JSON con las rutas |
-| `get_schema` | El JSON Schema de todo, con un ejemplo mínimo y uno completo de cada herramienta. También como recurso MCP `storyboard://schema`. | nada | JSON |
+| `get_schema` | El JSON Schema de todo, con ejemplos de cada herramienta (mínimo y completo; de `make_storyboard`, también de planos, mosaico y animática). También como recurso MCP `storyboard://schema`. | nada | JSON |
 
 Cada respuesta es un JSON: va como texto y también como `structuredContent`, que sigue el `outputSchema` de la herramienta. Las rutas son **absolutas**. Sin `output.dir`, los archivos van a una carpeta temporal (`<temp>/storyboard-mcp/<nombre de la entrada>/`), cuya ruta viene en la respuesta.
 

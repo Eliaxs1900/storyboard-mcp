@@ -1,0 +1,1172 @@
+{
+ "media_info_video": {
+  "tool": "media_info",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   }
+  }
+ },
+ "media_info_fotos": {
+  "tool": "media_info",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   }
+  }
+ },
+ "minimo": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "minimo",
+    "preview": false
+   }
+  }
+ },
+ "plantilla_grid": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "count": 6
+   },
+   "layout": {
+    "panel_width": 320,
+    "columns": 3
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "plantilla_grid",
+    "preview": false
+   }
+  }
+ },
+ "plantilla_storyboard": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     2.5,
+     9.5,
+     15.5
+    ]
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "sound": "Tráfico lejano"
+    },
+    {
+     "shot": "PM",
+     "camera": "Travelling lateral",
+     "action": "La luz cambia.",
+     "transition": "Corte"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "VOZ EN OFF: Cada día igual.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "storyboard",
+    "panel_width": 320
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "plantilla_storyboard",
+    "preview": false
+   }
+  }
+ },
+ "plantilla_list": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     2.5,
+     9.5
+    ]
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "sound": "Tráfico lejano"
+    },
+    {
+     "shot": "PM",
+     "camera": "Travelling lateral",
+     "action": "La luz cambia.",
+     "transition": "Corte"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "VOZ EN OFF: Cada día igual.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "list",
+    "panel_width": 320
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "plantilla_list",
+    "preview": false
+   }
+  }
+ },
+ "plantilla_strip": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "count": 4
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "sound": "Tráfico lejano"
+    },
+    {
+     "shot": "PM",
+     "camera": "Travelling lateral",
+     "action": "La luz cambia.",
+     "transition": "Corte"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "VOZ EN OFF: Cada día igual.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "strip",
+    "panel_width": 280
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "plantilla_strip",
+    "preview": false
+   }
+  }
+ },
+ "tema_oscuro": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     2.5,
+     9.5,
+     15.5
+    ]
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "sound": "Tráfico lejano"
+    },
+    {
+     "shot": "PM",
+     "camera": "Travelling lateral",
+     "action": "La luz cambia.",
+     "transition": "Corte"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "VOZ EN OFF: Cada día igual.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "storyboard",
+    "panel_width": 320
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "tema_oscuro",
+    "preview": false
+   }
+  }
+ },
+ "tema_claro": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     2.5,
+     9.5,
+     15.5
+    ]
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "sound": "Tráfico lejano"
+    },
+    {
+     "shot": "PM",
+     "camera": "Travelling lateral",
+     "action": "La luz cambia.",
+     "transition": "Corte"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "VOZ EN OFF: Cada día igual.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "storyboard",
+    "panel_width": 320
+   },
+   "style": {
+    "theme": "light"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "tema_claro",
+    "preview": false
+   }
+  }
+ },
+ "tema_propio": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     2.5,
+     9.5,
+     15.5
+    ]
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "sound": "Tráfico lejano"
+    },
+    {
+     "shot": "PM",
+     "camera": "Travelling lateral",
+     "action": "La luz cambia.",
+     "transition": "Corte"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "VOZ EN OFF: Cada día igual.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "storyboard",
+    "panel_width": 320
+   },
+   "style": {
+    "background": "#1e293b",
+    "text": "#f8fafc",
+    "text_secondary": "#94a3b8",
+    "accent": "#f472b6",
+    "panel_border": "#334155",
+    "notes_background": "#0f172a",
+    "notes_text": "#e2e8f0",
+    "font": "Georgia",
+    "font_bold": "Georgia Bold"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "tema_propio",
+    "preview": false
+   }
+  }
+ },
+ "sel_nitido": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 6,
+    "label": {
+     "fields": [
+      "number",
+      "frame",
+      "sharpness"
+     ]
+    }
+   },
+   "select": {
+    "count": 6
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "sel_nitido",
+    "preview": false
+   }
+  }
+ },
+ "sel_centro": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 6,
+    "label": {
+     "fields": [
+      "number",
+      "frame",
+      "sharpness"
+     ]
+    }
+   },
+   "select": {
+    "count": 6,
+    "mode": "even"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "sel_centro",
+    "preview": false
+   }
+  }
+ },
+ "sel_exacto": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 6,
+    "label": {
+     "fields": [
+      "number",
+      "frame",
+      "sharpness"
+     ]
+    }
+   },
+   "select": {
+    "step_pct": 20
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "sel_exacto",
+    "preview": false
+   }
+  }
+ },
+ "sel_exacto_snap": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 6,
+    "label": {
+     "fields": [
+      "number",
+      "frame",
+      "sharpness"
+     ]
+    }
+   },
+   "select": {
+    "step_pct": 20,
+    "snap_s": 0.5
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "sel_exacto_snap",
+    "preview": false
+   }
+  }
+ },
+ "filtros_sin": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 5,
+    "label": {
+     "fields": [
+      "number",
+      "frame",
+      "sharpness"
+     ]
+    }
+   },
+   "select": {
+    "count": 10,
+    "mode": "even"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "filtros_sin",
+    "preview": false
+   }
+  }
+ },
+ "filtros_con": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 5,
+    "label": {
+     "fields": [
+      "number",
+      "frame",
+      "sharpness"
+     ]
+    }
+   },
+   "select": {
+    "count": 10,
+    "mode": "even",
+    "drop_blurriest_pct": 50,
+    "min_difference": 6
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "filtros_con",
+    "preview": false
+   }
+  }
+ },
+ "etiqueta_defecto": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_pct": [
+     0,
+     100
+    ]
+   },
+   "layout": {
+    "panel_width": 400,
+    "columns": 2
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "etiqueta_defecto",
+    "preview": false
+   }
+  }
+ },
+ "etiqueta_campos": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_pct": [
+     0,
+     100
+    ]
+   },
+   "layout": {
+    "panel_width": 400,
+    "columns": 2,
+    "label": {
+     "fields": [
+      "number",
+      "timecode",
+      "pct"
+     ],
+     "position": "bottom"
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "etiqueta_campos",
+    "preview": false
+   }
+  }
+ },
+ "etiqueta_plantilla": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_pct": [
+     0,
+     100
+    ]
+   },
+   "layout": {
+    "panel_width": 400,
+    "columns": 2,
+    "numbering": {
+     "format": "SH{n:03d}"
+    },
+    "label": {
+     "template": "{number} · fotograma {frame} de {frames_total}"
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "etiqueta_plantilla",
+    "preview": false
+   }
+  }
+ },
+ "etiqueta_escena": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_pct": [
+     0,
+     100
+    ]
+   },
+   "panels": [
+    {
+     "action": "Primer plano"
+    },
+    {
+     "number": "5.2A",
+     "action": "Inserto añadido"
+    }
+   ],
+   "layout": {
+    "panel_width": 400,
+    "columns": 2,
+    "template": "storyboard",
+    "numbering": {
+     "format": "5.{n}"
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "etiqueta_escena",
+    "preview": false
+   }
+  }
+ },
+ "guia_239": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     8.6
+    ]
+   },
+   "layout": {
+    "panel_width": 480,
+    "header": false,
+    "footer": false,
+    "label": {
+     "show": false
+    },
+    "guides": {
+     "aspects": [
+      "2.39:1"
+     ]
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "guia_239",
+    "preview": false
+   }
+  }
+ },
+ "guia_916": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     8.6
+    ]
+   },
+   "layout": {
+    "panel_width": 480,
+    "header": false,
+    "footer": false,
+    "label": {
+     "show": false
+    },
+    "guides": {
+     "aspects": [
+      "9:16",
+      "1:1"
+     ]
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "guia_916",
+    "preview": false
+   }
+  }
+ },
+ "guia_segura": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     8.6
+    ]
+   },
+   "layout": {
+    "panel_width": 480,
+    "header": false,
+    "footer": false,
+    "label": {
+     "show": false
+    },
+    "guides": {
+     "safe_zone": true,
+     "thirds": true
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "guia_segura",
+    "preview": false
+   }
+  }
+ },
+ "fotos_todas": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   },
+   "layout": {
+    "panel_width": 300,
+    "columns": 5
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "fotos_todas",
+    "preview": false
+   }
+  }
+ },
+ "fotos_mejores": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   },
+   "select": {
+    "drop_blurriest_pct": 20,
+    "min_difference": 4
+   },
+   "layout": {
+    "panel_width": 300,
+    "columns": 5,
+    "label": {
+     "fields": [
+      "number",
+      "name",
+      "sharpness"
+     ]
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "fotos_mejores",
+    "preview": false
+   }
+  }
+ },
+ "fotos_best": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   },
+   "select": {
+    "mode": "best",
+    "count": 4
+   },
+   "layout": {
+    "panel_width": 300,
+    "columns": 4,
+    "label": {
+     "fields": [
+      "number",
+      "name",
+      "sharpness"
+     ]
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "fotos_best",
+    "preview": false
+   }
+  }
+ },
+ "fotos_lista": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "images": [
+     "/Users/ana/ejemplos/fotos/foto_01.jpg",
+     "/Users/ana/ejemplos/fotos/foto_09_movil.jpg"
+    ]
+   },
+   "panels": [
+    {
+     "action": "Paisaje del día 1."
+    },
+    {
+     "action": "Foto vertical del móvil: se gira sola (EXIF)."
+    }
+   ],
+   "layout": {
+    "template": "list",
+    "panel_width": 300,
+    "label": {
+     "fields": [
+      "name",
+      "size"
+     ]
+    }
+   },
+   "style": {
+    "theme": "light"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "fotos_lista",
+    "preview": false
+   }
+  }
+ },
+ "pdf": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "count": 8
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece."
+    },
+    {
+     "shot": "PM",
+     "camera": "Paneo"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "ANA: Llego tarde."
+    }
+   ],
+   "layout": {
+    "template": "storyboard",
+    "page": "A4",
+    "title": "Escena 3 — Amanecer",
+    "numbering": {
+     "format": "3.{n}"
+    }
+   },
+   "style": {
+    "theme": "light"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "pdf",
+    "preview": false,
+    "format": "pdf",
+    "shot_list": [
+     "json",
+     "csv"
+    ]
+   }
+  }
+ },
+ "pdf_png": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "count": 8
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece."
+    },
+    {
+     "shot": "PM",
+     "camera": "Paneo"
+    },
+    {
+     "shot": "PP",
+     "dialogue": "ANA: Llego tarde."
+    }
+   ],
+   "layout": {
+    "template": "storyboard",
+    "page": "A4",
+    "title": "Escena 3 — Amanecer",
+    "numbering": {
+     "format": "3.{n}"
+    }
+   },
+   "style": {
+    "theme": "light"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "pdf_png",
+    "preview": false
+   }
+  }
+ },
+ "uso_tramo": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "start_s": 5,
+    "end_s": 10,
+    "every_s": 1
+   },
+   "layout": {
+    "panel_width": 256,
+    "columns": 5
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "uso_tramo",
+    "preview": false
+   }
+  }
+ },
+ "uso_movil": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/movil.mp4"
+   },
+   "select": {
+    "count": 4
+   },
+   "layout": {
+    "template": "strip",
+    "panel_width": 200
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "uso_movil",
+    "preview": false
+   }
+  }
+ },
+ "uso_rafaga": {
+  "tool": "extract_frames",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   },
+   "select": {
+    "mode": "best",
+    "count": 3
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos/mejores",
+    "names": "original"
+   }
+  }
+ },
+ "extraer_pct": {
+  "tool": "extract_frames",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_pct": [
+     0,
+     50,
+     100
+    ]
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos/extraer"
+   }
+  }
+ },
+ "extraer_snap": {
+  "tool": "extract_frames",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_frames": [
+     90
+    ],
+    "snap_s": 0.5
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos/extraer_snap"
+   }
+  }
+ },
+ "extraer_fotos": {
+  "tool": "extract_frames",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   },
+   "select": {
+    "mode": "sharpest",
+    "count": 3
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos/extraer_fotos"
+   }
+  }
+ },
+ "planos": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/planos.mp4"
+   },
+   "select": {
+    "mode": "shots"
+   },
+   "layout": {
+    "panel_width": 320,
+    "columns": 3
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "planos",
+    "preview": false,
+    "shot_list": [
+     "json",
+     "csv"
+    ],
+    "color_script": true
+   }
+  }
+ },
+ "mosaico": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "count": 6
+   },
+   "layout": {
+    "panel_width": 320,
+    "columns": 3
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "mosaico",
+    "preview": false,
+    "format": "gif"
+   }
+  }
+ },
+ "mosaico_readme": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "count": 6
+   },
+   "layout": {
+    "panel_width": 320,
+    "columns": 3
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "mosaico_readme",
+    "preview": false,
+    "format": "webp",
+    "quality": 60,
+    "animation": {
+     "max_side": 640,
+     "fps": 8
+    }
+   }
+  }
+ },
+ "animatica": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/ciudad.mp4"
+   },
+   "select": {
+    "at_s": [
+     2.5,
+     9.5,
+     15.5
+    ],
+    "snap_s": 0.5
+   },
+   "panels": [
+    {
+     "shot": "PG",
+     "action": "Amanece sobre la ciudad.",
+     "duration_s": 2.5,
+     "transition": "encadenado"
+    },
+    {
+     "shot": "PM",
+     "dialogue": "ANA: Llego tarde.",
+     "duration_s": 2,
+     "transition": "fundido a negro"
+    },
+    {
+     "shot": "PP",
+     "action": "Mira el reloj.",
+     "duration_s": 2.5
+    }
+   ],
+   "layout": {
+    "template": "storyboard"
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "animatica",
+    "preview": false,
+    "format": "mp4",
+    "animation": {
+     "kind": "animatic",
+     "max_side": 1280,
+     "fade_s": 0.6
+    }
+   }
+  }
+ },
+ "animatica_planos": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "video": "/Users/ana/ejemplos/planos.mp4"
+   },
+   "select": {
+    "mode": "shots"
+   },
+   "layout": {
+    "label": {
+     "fields": [
+      "number",
+      "shot_in",
+      "duration",
+      "transition"
+     ]
+    }
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "animatica_planos",
+    "preview": false,
+    "format": "mp4",
+    "animation": {
+     "kind": "animatic",
+     "max_side": 1280
+    }
+   }
+  }
+ },
+ "presentacion": {
+  "tool": "make_storyboard",
+  "arguments": {
+   "input": {
+    "folder": "/Users/ana/ejemplos/fotos"
+   },
+   "select": {
+    "mode": "best",
+    "count": 4
+   },
+   "output": {
+    "dir": "/Users/ana/ejemplos",
+    "name": "presentacion",
+    "preview": false,
+    "format": "webp",
+    "animation": {
+     "panel_s": 2,
+     "transition": "dissolve",
+     "fade_s": 0.8
+    }
+   }
+  }
+ }
+}

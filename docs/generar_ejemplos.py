@@ -295,12 +295,20 @@ def load_server():
 SRV = None
 
 
+CALLS: dict = {}
+
+
 def run(name: str, tool: str, args: dict) -> dict:
-    """Llama a una herramienta y guarda la respuesta (con rutas de ejemplo) en json/<name>.json."""
+    """Llama a una herramienta y guarda la respuesta (con rutas de ejemplo) en json/<name>.json;
+    la llamada exacta va a json/llamadas.json."""
     data, _ = SRV.run_tool(tool, args)
-    text = json.dumps(data, ensure_ascii=False, indent=1).replace(str(WORK.resolve()), FAKE)
+    fake = lambda x: json.loads(json.dumps(x, ensure_ascii=False).replace(str(WORK.resolve()), FAKE))  # noqa: E731
+    text = json.dumps(fake(data), ensure_ascii=False, indent=1)
     (OUT / "json").mkdir(exist_ok=True)
     (OUT / "json" / f"{name}.json").write_text(text + "\n", encoding="utf-8")
+    CALLS[name] = {"tool": tool, "arguments": fake(args)}
+    (OUT / "json" / "llamadas.json").write_text(json.dumps(CALLS, ensure_ascii=False, indent=1) + "\n",
+                                                 encoding="utf-8")
     print(f"  {name}: {tool}")
     return data
 
@@ -926,13 +934,15 @@ def video_figures(planos: dict) -> None:
          f"{av_['size'][0]}×{av_['size'][1]}, {av_['duration_s']} s. El JSON da video_s: cuándo sale cada viñeta."),
         ("Animática de planos: repite el montaje del vídeo",
          [(im, f"{t:.1f} s · {cap}") for im, t, cap in zip(bframes, bt, bcap)],
-         ['"select": {"mode": "shots"},', '"output": {"format": "mp4", "animation": {"kind": "animatic"}}'],
+         ['"select": {"mode": "shots"},', '"output": {"format": "mp4",',
+          '           "animation": {"kind": "animatic", "max_side": 1280}}'],
          "Con mode \"shots\", cada plano dura lo mismo que en el vídeo y lleva el corte, el encadenado o el "
          "fundido que se detectó."),
         ("Con imágenes: una presentación temporizada",
          [(im, f"{t:.1f} s · {cap}") for im, t, cap in zip(cframes, ct, ccap)],
          ['"input": {"folder": ".../fotos"}, "select": {"mode": "best", "count": 4},',
-          '"output": {"format": "webp", "animation": {"panel_s": 2, "transition": "dissolve"}}'],
+          '"output": {"format": "webp",',
+          '           "animation": {"panel_s": 2, "transition": "dissolve", "fade_s": 0.8}}'],
          "Con imágenes, la salida animada es siempre una animática: cada foto dura panel_s segundos (o su "
          "duration_s en panels[]), y aquí se encadena con la siguiente."),
     ], OUT / "fig_video.png")
