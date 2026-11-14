@@ -1,6 +1,6 @@
 {
  "server": "storyboard",
- "version": "2.0.0",
+ "version": "2.1.0",
  "conventions": [
   "Every tool takes the same sections: input (required), select, panels, layout, style, output. Unknown keys are rejected with the list of allowed ones.",
   "input: exactly one of video (path), images (list of paths) or folder (path, with optional pattern).",
@@ -8,7 +8,8 @@
   "Video positions: frame numbers 0..frames-1; seconds from the first frame (0.0); % from the first frame (0) to the last (100). Images: index 0..count-1, file name, or % of the list.",
   "Colours: #RRGGBB, #RRGGBBAA, #RGB, #RGBA or a CSS name. Sizes in px.",
   "Defaults: video -> the sharpest frame of each of 12 stretches; images -> all; layout grid with 4 columns; theme dark (black page); output png in a temporary folder named in the answer.",
-  "Answers are JSON (also as structured content). make_storyboard also returns a small image of page 1."
+  "Answers are JSON (also as structured content). make_storyboard also returns a small image of page 1.",
+  "Animated output (output.format mp4, webm, gif, webp) always comes with the still pages as PNG, an image of sample frames (videos[].samples) and the JSON. Limits: 300 s, 3600 frames, 30 fps, 3840 px (gif and webp 1280 px)."
  ],
  "tools": {
   "media_info": {
@@ -356,9 +357,90 @@
    }
   },
   "make_storyboard": {
-   "description": "Turn a video or a list of images into pages of panels you can look at, plus one JSON entry per panel. Templates (layout.template): grid (contact sheet, the default), storyboard (number above each picture, notes box below), list (picture left, notes right), strip (one row). Pages as PNG or JPG files, or one multi-page PDF (output.format); optional shot list (JSON / CSV) and full-size frames.\nOnly input is required: {\"input\": {\"video\": \"/abs/clip.mp4\"}} gives a grid of the 12 sharpest frames (one per stretch of the video). The answer lists the page files (open them to see the panels; page 1 also comes as an image) and, per panel, its number, page, frame and time (video) or image index and name (images), sharpness and notes.\nTo write a storyboard: look at a first result, then call again with the same select plus panels[] (one object per panel, in order: shot, camera, action, dialogue, sound, transition, duration_s) and layout.template \"storyboard\"; or give each panel its own position (frame, at_s, at_pct, image, image_name).\nRecipes: 8 sharp, different frames: {\"select\": {\"count\": 8, \"min_difference\": 3}}. One every 10 %: {\"select\": {\"step_pct\": 10}}. The 4 sharpest photos, no repeats: {\"input\": {\"folder\": \"/abs/photos\"}, \"select\": {\"mode\": \"best\", \"count\": 4}}. Printable storyboard: {\"layout\": {\"template\": \"storyboard\", \"page\": \"A4\"}, \"style\": {\"theme\": \"light\"}, \"output\": {\"format\": \"pdf\", \"shot_list\": [\"csv\"]}} (add \"csv_style\": \"excel_es\" for Excel in Spanish). If fewer panels than asked come out, warnings says why and what to change. get_schema {\"tool\": \"make_storyboard\"} has a full example.",
+   "description": "Turn a video or a list of images into pages of panels you can look at, plus one JSON entry per panel. Templates (layout.template): grid (contact sheet, the default), storyboard (number above each picture, notes box below), list (picture left, notes right), strip (one row). Pages as PNG or JPG files, or one multi-page PDF (output.format); optional shot list (JSON / CSV) and full-size frames.\nOnly input is required: {\"input\": {\"video\": \"/abs/clip.mp4\"}} gives a grid of the 12 sharpest frames (one per stretch of the video). The answer lists the page files (open them to see the panels; page 1 also comes as an image) and, per panel, its number, page, frame and time (video) or image index and name (images), sharpness and notes.\nTo write a storyboard: look at a first result, then call again with the same select plus panels[] (one object per panel, in order: shot, camera, action, dialogue, sound, transition, duration_s) and layout.template \"storyboard\"; or give each panel its own position (frame, at_s, at_pct, image, image_name).\nRecipes: 8 sharp, different frames: {\"select\": {\"count\": 8, \"min_difference\": 3}}. One every 10 %: {\"select\": {\"step_pct\": 10}}. The 4 sharpest photos, no repeats: {\"input\": {\"folder\": \"/abs/photos\"}, \"select\": {\"mode\": \"best\", \"count\": 4}}. Printable storyboard: {\"layout\": {\"template\": \"storyboard\", \"page\": \"A4\"}, \"style\": {\"theme\": \"light\"}, \"output\": {\"format\": \"pdf\", \"shot_list\": [\"csv\"]}} (add \"csv_style\": \"excel_es\" for Excel in Spanish).\nOne panel per shot: {\"select\": {\"mode\": \"shots\"}}: each panel gets shot_in_s, shot_out_s, duration_s and transition_in / transition_out (cut, fade_in / fade_out, dissolve).\nAnimated: \"output\": {\"format\": \"gif\"} (or \"mp4\", \"webm\", \"webp\"). With a video, the page itself with every panel playing its part of the video (mosaic); with images, a timed slideshow; \"animation\": {\"kind\": \"animatic\"} plays the panels one after another with their duration_s and transition. You cannot watch it: the answer has the still page and videos[].samples, an image of sample frames.\nColour script: \"output\": {\"color_script\": true} (dominant colours per panel).\nIf fewer panels than asked come out, warnings says why and what to change. get_schema {\"tool\": \"make_storyboard\"} has full examples.",
    "input_schema": {
     "$defs": {
+     "AnimationSpec": {
+      "additionalProperties": false,
+      "description": "Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an\nimage of sample frames and the JSON are always written too: they are what an assistant can look at.",
+      "properties": {
+       "kind": {
+        "default": "auto",
+        "description": "\"mosaic\" (video input): the page itself, with every panel playing its part of the video in a loop, all at once, and a progress bar under each panel. \"animatic\": the panels one after another, each on screen for its duration, with its number, caption and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. \"auto\" (default): mosaic for video, animatic for images.",
+        "enum": [
+         "auto",
+         "mosaic",
+         "animatic"
+        ],
+        "type": "string"
+       },
+       "fps": {
+        "default": 12,
+        "description": "Frames per second of the animation.",
+        "maximum": 30,
+        "minimum": 1,
+        "type": "integer"
+       },
+       "duration_s": {
+        "anyOf": [
+         {
+          "exclusiveMinimum": 0,
+          "maximum": 300,
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Length of the video, s. Mosaic: the loop (default: the longest part a panel plays, at most 8 s); a longer part plays faster, a shorter one starts over. Animatic: the total (default: the sum of the panel durations); if given, every duration is scaled to fit. At most 300 s and 3600 frames (duration_s × fps)."
+       },
+       "panel_s": {
+        "default": 2.0,
+        "description": "Animatic: seconds on screen for a panel without a duration of its own (panels[].duration_s, or the shot length in select mode \"shots\").",
+        "maximum": 60,
+        "minimum": 0.1,
+        "type": "number"
+       },
+       "transition": {
+        "default": "cut",
+        "description": "Animatic: transition after a panel without one of its own: \"cut\", \"fade\" (through black) or \"dissolve\" (mixes into the next). panels[].transition, and in select mode \"shots\" the detected transitions, come first.",
+        "enum": [
+         "cut",
+         "fade",
+         "dissolve"
+        ],
+        "type": "string"
+       },
+       "fade_s": {
+        "default": 0.5,
+        "description": "Animatic: length of each fade or dissolve, s (never more than half a panel).",
+        "exclusiveMinimum": 0,
+        "maximum": 5,
+        "type": "number"
+       },
+       "max_side": {
+        "anyOf": [
+         {
+          "maximum": 3840,
+          "minimum": 64,
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Longest side of the video, px; the page or panel is scaled down to fit. Default: 1920 for mp4 and webm, 960 for gif and webp (gif and webp: at most 1280)."
+       },
+       "progress": {
+        "default": true,
+        "description": "Progress bars: one under each panel showing where its part is (mosaic), or one along the bottom with a mark per panel (animatic).",
+        "type": "boolean"
+       }
+      },
+      "type": "object"
+     },
      "GuidesSpec": {
       "additionalProperties": false,
       "description": "Lines drawn over each picture.",
@@ -505,7 +587,11 @@
             "anchor",
             "image",
             "name",
-            "size"
+            "size",
+            "shot_in",
+            "shot_out",
+            "duration",
+            "transition"
            ],
            "type": "string"
           },
@@ -516,7 +602,7 @@
          }
         ],
         "default": null,
-        "description": "What the caption says, in this order. Video: number, frame (#123), time (4.1s), timecode (0:00:04.1), pct (20%), sharpness, sharpness_pct, anchor (first / last frame). Images: number, image (#3), name (file name), size (4032×3024), pct, sharpness, sharpness_pct. Default: video [\"number\", \"time\", \"frame\", \"anchor\"], images [\"number\", \"name\"]."
+        "description": "What the caption says, in this order. Video: number, frame (#123), time (4.1s), timecode (0:00:04.1), pct (20%), sharpness, sharpness_pct, anchor (first / last frame). Images: number, image (#3), name (file name), size (4032×3024), pct, sharpness, sharpness_pct. Select mode \"shots\" only: shot_in (0:00:04.1), shot_out, duration (2.5s), transition (how the shot ends: corte, fundido a negro, encadenado...). Default: video [\"number\", \"time\", \"frame\", \"anchor\"], mode \"shots\" [\"number\", \"shot_in\", \"duration\", \"transition\"], images [\"number\", \"name\"]."
        },
        "template": {
         "anyOf": [
@@ -529,7 +615,7 @@
          }
         ],
         "default": null,
-        "description": "Free text instead of fields, with placeholders: {number} {frame} {frames_total} {time} {timecode} {pct} {pct1} {sharpness} {sharpness_pct} {anchor} {image} {name} {images_total} {size}. E.g. \"{number}. {timecode}\"."
+        "description": "Free text instead of fields, with placeholders: {number} {frame} {frames_total} {time} {timecode} {pct} {pct1} {sharpness} {sharpness_pct} {anchor} {image} {name} {images_total} {size} (mode \"shots\": {shot_in} {shot_out} {duration} {transition}). E.g. \"{number}. {timecode}\"."
        },
        "position": {
         "default": "top",
@@ -997,7 +1083,7 @@
          }
         ],
         "default": null,
-        "description": "Transition to the next panel, e.g. \"corte\", \"fundido a negro\"."
+        "description": "Transition to the next panel, e.g. \"corte\", \"fundido a negro\", \"encadenado\". The animatic plays it: a text with \"fund\" or \"fade\" is a fade through black, with \"encaden\" or \"dissolv\" a dissolve, anything else a cut."
        },
        "duration_s": {
         "anyOf": [
@@ -1011,7 +1097,7 @@
          }
         ],
         "default": null,
-        "description": "Planned duration, in seconds."
+        "description": "Planned duration, in seconds; the animatic shows the panel this long."
        }
       },
       "type": "object"
@@ -1022,13 +1108,14 @@
       "properties": {
        "mode": {
         "default": "auto",
-        "description": "\"sharpest\": the range is cut into count equal stretches and the least blurry frame of each is taken (picks at least half a stretch apart). \"even\": the frame in the middle of each stretch. \"best\": the count sharpest of the whole range, never the same picture twice, in their order (they may all come from one part of a video). \"all\": every frame / image of the range (at most 500). \"auto\" (default): \"sharpest\" for video; for images \"all\", or \"sharpest\" when count or every_pct is given.",
+        "description": "\"sharpest\": the range is cut into count equal stretches and the least blurry frame of each is taken (picks at least half a stretch apart). \"even\": the frame in the middle of each stretch. \"best\": the count sharpest of the whole range, never the same picture twice, in their order (they may all come from one part of a video). \"all\": every frame / image of the range (at most 500). \"shots\" (video): one panel per shot, found by its cuts, fades and dissolves; each panel shows the sharpest frame of its shot and the answer gives each shot's start, end, duration and transitions (count is not used). \"auto\" (default): \"sharpest\" for video; for images \"all\", or \"sharpest\" when count or every_pct is given.",
         "enum": [
          "auto",
          "sharpest",
          "even",
          "best",
-         "all"
+         "all",
+         "shots"
         ],
         "type": "string"
        },
@@ -1285,6 +1372,25 @@
         "maximum": 4096,
         "minimum": 64,
         "type": "integer"
+       },
+       "shot_threshold": {
+        "default": 20,
+        "description": "Mode \"shots\": how big a jump between two consecutive frames counts as a cut: mean difference 0-255 of small 64×36 colour copies, which must also be twice the movement around it. Fades and dissolves need 60 % of it over half a second. Lower (10-15) finds cuts between similar shots; higher (30+) ignores fast movement.",
+        "maximum": 255,
+        "minimum": 1,
+        "type": "number"
+       },
+       "min_shot_s": {
+        "default": 0.4,
+        "description": "Mode \"shots\": shortest shot, s. A cut closer than this to the previous one is not used (flashes, very fast editing).",
+        "maximum": 60,
+        "minimum": 0,
+        "type": "number"
+       },
+       "fades": {
+        "default": true,
+        "description": "Mode \"shots\": also find gradual transitions (fades from or to a plain colour, usually black, and dissolves); false = only cuts.",
+        "type": "boolean"
        }
       },
       "type": "object"
@@ -1320,17 +1426,24 @@
        },
        "format": {
         "default": "png",
-        "description": "\"png\" (lossless; keeps a transparent background), \"jpg\", or \"pdf\" (one file, one PDF page per page). Any case. \"webp\", \"gif\", \"mp4\" and \"webm\" are planned for animated output and not available yet.",
+        "description": "\"png\" (lossless; keeps a transparent background), \"jpg\", \"pdf\" (one file, one PDF page per page), or animated: \"mp4\" (H.264), \"webm\" (VP9), \"gif\" or \"webp\" (both loop forever), set up in output.animation; with these the pages are also written as PNG. Any case.",
         "enum": [
          "png",
          "jpg",
-         "pdf"
+         "pdf",
+         "mp4",
+         "webm",
+         "gif",
+         "webp"
         ],
         "type": "string"
        },
+       "animation": {
+        "$ref": "#/$defs/AnimationSpec"
+       },
        "quality": {
         "default": 90,
-        "description": "JPEG quality (jpg, and the pictures inside a pdf).",
+        "description": "JPEG quality (jpg, and the pictures inside a pdf); also the quality of mp4, webm and webp (higher = better and bigger).",
         "maximum": 100,
         "minimum": 1,
         "type": "integer"
@@ -1373,9 +1486,21 @@
         "description": "Also write the pages without captions (<name>_nolabels...).",
         "type": "boolean"
        },
+       "color_script": {
+        "default": false,
+        "description": "Also write the colour script: <name>_colors.png, a strip with the dominant colours of each panel, in order (with each picture above when it fits), and add colors (hex and % of the picture) to each panel in the JSON.",
+        "type": "boolean"
+       },
+       "color_count": {
+        "default": 5,
+        "description": "Colour script: dominant colours per panel.",
+        "maximum": 12,
+        "minimum": 1,
+        "type": "integer"
+       },
        "preview": {
         "default": true,
-        "description": "Include a small image of page 1 in the answer.",
+        "description": "Include a small image of page 1 in the answer (and, with an animated format, of the sample frames).",
         "type": "boolean"
        }
       },
@@ -1690,6 +1815,24 @@
    },
    "output_schema": {
     "$defs": {
+     "ColorShare": {
+      "additionalProperties": false,
+      "properties": {
+       "hex": {
+        "description": "Colour, \"#rrggbb\".",
+        "type": "string"
+       },
+       "pct": {
+        "description": "Share of the picture with this colour, %.",
+        "type": "number"
+       }
+      },
+      "required": [
+       "hex",
+       "pct"
+      ],
+      "type": "object"
+     },
      "Dropped": {
       "additionalProperties": false,
       "properties": {
@@ -2144,6 +2287,174 @@
         ],
         "default": null,
         "description": "The panel's notes, as given in panels[]."
+       },
+       "shot_in_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Select mode \"shots\": when the shot starts (its first frame), s."
+       },
+       "shot_out_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": when it ends: the next shot's first frame, or the end of the range, s."
+       },
+       "duration_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": shot_out_s - shot_in_s, s."
+       },
+       "shot_frames": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "integer"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": [first, last] frame of the shot."
+       },
+       "transition_in": {
+        "anyOf": [
+         {
+          "enum": [
+           "start",
+           "cut",
+           "fade_in",
+           "dissolve"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": how the shot begins: \"start\" (the range starts there), \"cut\", \"fade_in\" (from a plain colour, usually black) or \"dissolve\" (mixed with the shot before)."
+       },
+       "transition_out": {
+        "anyOf": [
+         {
+          "enum": [
+           "cut",
+           "fade_out",
+           "dissolve",
+           "end"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": how it ends: \"cut\", \"fade_out\" (to a plain colour, usually black), \"dissolve\" (mixed with the next shot) or \"end\" (the range ends there)."
+       },
+       "transition_in_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Length of a gradual transition_in (fade or dissolve), s."
+       },
+       "transition_out_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Length of a gradual transition_out, s."
+       },
+       "colors": {
+        "anyOf": [
+         {
+          "items": {
+           "$ref": "#/$defs/ColorShare"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "output.color_script: dominant colours of the picture, most common first."
+       },
+       "clip_s": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "number"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animated mosaic: [start, end] of the part of the video this panel plays, s."
+       },
+       "speed": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animated mosaic: playback speed of that part (1 = real time, 4 = four times faster)."
+       },
+       "video_s": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "number"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: [start, end] when this panel is on screen in the video, s."
        }
       },
       "required": [
@@ -2156,7 +2467,7 @@
       "additionalProperties": false,
       "properties": {
        "mode": {
-        "description": "\"sharpest\", \"even\", \"all\", \"positions\" or \"panels\".",
+        "description": "\"sharpest\", \"even\", \"best\", \"all\", \"shots\", \"positions\" or \"panels\".",
         "type": "string"
        },
        "range_s": {
@@ -2202,6 +2513,18 @@
         ],
         "default": null,
         "description": "min, p25, median, p75, max of the measured ones (nearest measured value, not interpolated): use it for min_sharpness."
+       },
+       "shots": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/ShotsInfo"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": what was found."
        }
       },
       "required": [
@@ -2209,6 +2532,44 @@
        "range_pct",
        "measured",
        "threshold"
+      ],
+      "type": "object"
+     },
+     "ShotsInfo": {
+      "additionalProperties": false,
+      "properties": {
+       "found": {
+        "description": "Shots found in the range.",
+        "type": "integer"
+       },
+       "cuts": {
+        "description": "Transitions between shots that are cuts.",
+        "type": "integer"
+       },
+       "fades": {
+        "description": "... that go through a plain colour (fade out, then cut or fade in).",
+        "type": "integer"
+       },
+       "dissolves": {
+        "description": "... that are dissolves.",
+        "type": "integer"
+       },
+       "threshold": {
+        "description": "select.shot_threshold used.",
+        "type": "number"
+       },
+       "min_shot_s": {
+        "description": "select.min_shot_s used.",
+        "type": "number"
+       }
+      },
+      "required": [
+       "found",
+       "cuts",
+       "fades",
+       "dissolves",
+       "threshold",
+       "min_shot_s"
       ],
       "type": "object"
      },
@@ -2292,6 +2653,91 @@
        "displayed_size"
       ],
       "type": "object"
+     },
+     "VideoResult": {
+      "additionalProperties": false,
+      "properties": {
+       "kind": {
+        "enum": [
+         "mosaic",
+         "animatic"
+        ],
+        "type": "string"
+       },
+       "page": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mosaic: the page it animates."
+       },
+       "path": {
+        "description": "The video or animated image.",
+        "type": "string"
+       },
+       "format": {
+        "description": "\"mp4\", \"webm\", \"gif\" or \"webp\".",
+        "type": "string"
+       },
+       "codec": {
+        "description": "\"h264\", \"vp9\", \"gif\", \"webp\"...",
+        "type": "string"
+       },
+       "size": {
+        "description": "[width, height] px.",
+        "items": {
+         "type": "integer"
+        },
+        "type": "array"
+       },
+       "fps": {
+        "type": "integer"
+       },
+       "frames": {
+        "type": "integer"
+       },
+       "duration_s": {
+        "type": "number"
+       },
+       "bytes": {
+        "type": "integer"
+       },
+       "loop": {
+        "description": "true: it plays forever (gif, webp); mp4 and webm play once unless the player loops them.",
+        "type": "boolean"
+       },
+       "samples": {
+        "description": "PNG with sample frames of the video and their times: open it to see what the video looks like.",
+        "type": "string"
+       },
+       "sample_times_s": {
+        "description": "Times of those frames in the video, s.",
+        "items": {
+         "type": "number"
+        },
+        "type": "array"
+       }
+      },
+      "required": [
+       "kind",
+       "path",
+       "format",
+       "codec",
+       "size",
+       "fps",
+       "frames",
+       "duration_s",
+       "bytes",
+       "loop",
+       "samples",
+       "sample_times_s"
+      ],
+      "type": "object"
      }
     },
     "additionalProperties": false,
@@ -2352,6 +2798,33 @@
        }
       ],
       "default": null
+     },
+     "videos": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/$defs/VideoResult"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Animated output (output.format mp4, webm, gif or webp): one video, or one per page (mosaic)."
+     },
+     "color_script": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "output.color_script: the PNG strip of dominant colours."
      },
      "panels": {
       "items": {
@@ -2478,11 +2951,98 @@
        "csv"
       ]
      }
+    },
+    "shots": {
+     "input": {
+      "video": "/Users/ana/Movies/trailer.mp4"
+     },
+     "select": {
+      "mode": "shots",
+      "shot_threshold": 20,
+      "min_shot_s": 0.4
+     },
+     "layout": {
+      "template": "storyboard",
+      "label": {
+       "fields": [
+        "shot_in",
+        "duration",
+        "transition"
+       ]
+      }
+     },
+     "output": {
+      "dir": "/Users/ana/Desktop/planos",
+      "shot_list": [
+       "json",
+       "csv"
+      ],
+      "color_script": true
+     }
+    },
+    "mosaic": {
+     "input": {
+      "video": "/Users/ana/Movies/clip.mp4"
+     },
+     "select": {
+      "count": 8
+     },
+     "output": {
+      "dir": "/Users/ana/Desktop/mosaico",
+      "format": "gif",
+      "animation": {
+       "kind": "mosaic",
+       "fps": 12,
+       "duration_s": 6
+      }
+     }
+    },
+    "animatic": {
+     "input": {
+      "video": "/Users/ana/Movies/clip.mp4"
+     },
+     "select": {
+      "at_s": [
+       1.5,
+       6,
+       12.5
+      ]
+     },
+     "panels": [
+      {
+       "shot": "PG",
+       "action": "Amanece.",
+       "duration_s": 3,
+       "transition": "encadenado"
+      },
+      {
+       "shot": "PM",
+       "dialogue": "ANA: Llego tarde.",
+       "duration_s": 2
+      },
+      {
+       "shot": "PP",
+       "action": "Mira el reloj.",
+       "transition": "fundido a negro"
+      }
+     ],
+     "layout": {
+      "template": "storyboard"
+     },
+     "output": {
+      "dir": "/Users/ana/Desktop/animatica",
+      "format": "mp4",
+      "animation": {
+       "kind": "animatic",
+       "panel_s": 2,
+       "fade_s": 0.5
+      }
+     }
     }
    }
   },
   "extract_frames": {
-   "description": "Save chosen video frames at full size (JPEG or PNG), or copies of chosen images, to look at details the panels are too small to show. Same input and select as make_storyboard, e.g. {\"input\": {\"video\": \"/abs/clip.mp4\"}, \"select\": {\"at_frames\": [120, 480]}} or {\"select\": {\"at_s\": [12.5], \"snap_s\": 0.5}} (the sharpest frame within ± 0.5 s). Frames are saved upright (rotation applied), at displayed_size, as f<frame, 5 digits>.jpg (frame 42 -> f00042.jpg). Images are copied byte for byte as 001_<name>, 002_<name>... (output.names \"original\" keeps the names). Each entry of files gives its path (file) and size in px.",
+   "description": "Save chosen video frames at full size (JPEG or PNG), or copies of chosen images, to look at details the panels are too small to show. Same input and select as make_storyboard, e.g. {\"input\": {\"video\": \"/abs/clip.mp4\"}, \"select\": {\"at_frames\": [120, 480]}} or {\"select\": {\"at_s\": [12.5], \"snap_s\": 0.5}} (the sharpest frame within ± 0.5 s). Frames are saved upright (rotation applied), at displayed_size, as f<frame, 5 digits>.jpg (frame 42 -> f00042.jpg). Images are copied byte for byte as 001_<name>, 002_<name>... (output.names \"original\" keeps the names). {\"select\": {\"mode\": \"shots\"}} saves the sharpest frame of each shot, with the shot's start, end and transitions. Each entry of files gives its path (file) and size in px.",
    "input_schema": {
     "$defs": {
      "FramesOutput": {
@@ -2612,13 +3172,14 @@
       "properties": {
        "mode": {
         "default": "auto",
-        "description": "\"sharpest\": the range is cut into count equal stretches and the least blurry frame of each is taken (picks at least half a stretch apart). \"even\": the frame in the middle of each stretch. \"best\": the count sharpest of the whole range, never the same picture twice, in their order (they may all come from one part of a video). \"all\": every frame / image of the range (at most 500). \"auto\" (default): \"sharpest\" for video; for images \"all\", or \"sharpest\" when count or every_pct is given.",
+        "description": "\"sharpest\": the range is cut into count equal stretches and the least blurry frame of each is taken (picks at least half a stretch apart). \"even\": the frame in the middle of each stretch. \"best\": the count sharpest of the whole range, never the same picture twice, in their order (they may all come from one part of a video). \"all\": every frame / image of the range (at most 500). \"shots\" (video): one panel per shot, found by its cuts, fades and dissolves; each panel shows the sharpest frame of its shot and the answer gives each shot's start, end, duration and transitions (count is not used). \"auto\" (default): \"sharpest\" for video; for images \"all\", or \"sharpest\" when count or every_pct is given.",
         "enum": [
          "auto",
          "sharpest",
          "even",
          "best",
-         "all"
+         "all",
+         "shots"
         ],
         "type": "string"
        },
@@ -2875,6 +3436,25 @@
         "maximum": 4096,
         "minimum": 64,
         "type": "integer"
+       },
+       "shot_threshold": {
+        "default": 20,
+        "description": "Mode \"shots\": how big a jump between two consecutive frames counts as a cut: mean difference 0-255 of small 64×36 colour copies, which must also be twice the movement around it. Fades and dissolves need 60 % of it over half a second. Lower (10-15) finds cuts between similar shots; higher (30+) ignores fast movement.",
+        "maximum": 255,
+        "minimum": 1,
+        "type": "number"
+       },
+       "min_shot_s": {
+        "default": 0.4,
+        "description": "Mode \"shots\": shortest shot, s. A cut closer than this to the previous one is not used (flashes, very fast editing).",
+        "maximum": 60,
+        "minimum": 0,
+        "type": "number"
+       },
+       "fades": {
+        "default": true,
+        "description": "Mode \"shots\": also find gradual transitions (fades from or to a plain colour, usually black, and dissolves); false = only cuts.",
+        "type": "boolean"
        }
       },
       "type": "object"
@@ -2899,6 +3479,24 @@
    },
    "output_schema": {
     "$defs": {
+     "ColorShare": {
+      "additionalProperties": false,
+      "properties": {
+       "hex": {
+        "description": "Colour, \"#rrggbb\".",
+        "type": "string"
+       },
+       "pct": {
+        "description": "Share of the picture with this colour, %.",
+        "type": "number"
+       }
+      },
+      "required": [
+       "hex",
+       "pct"
+      ],
+      "type": "object"
+     },
      "Dropped": {
       "additionalProperties": false,
       "properties": {
@@ -3313,6 +3911,174 @@
         ],
         "default": null,
         "description": "The panel's notes, as given in panels[]."
+       },
+       "shot_in_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Select mode \"shots\": when the shot starts (its first frame), s."
+       },
+       "shot_out_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": when it ends: the next shot's first frame, or the end of the range, s."
+       },
+       "duration_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": shot_out_s - shot_in_s, s."
+       },
+       "shot_frames": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "integer"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": [first, last] frame of the shot."
+       },
+       "transition_in": {
+        "anyOf": [
+         {
+          "enum": [
+           "start",
+           "cut",
+           "fade_in",
+           "dissolve"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": how the shot begins: \"start\" (the range starts there), \"cut\", \"fade_in\" (from a plain colour, usually black) or \"dissolve\" (mixed with the shot before)."
+       },
+       "transition_out": {
+        "anyOf": [
+         {
+          "enum": [
+           "cut",
+           "fade_out",
+           "dissolve",
+           "end"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": how it ends: \"cut\", \"fade_out\" (to a plain colour, usually black), \"dissolve\" (mixed with the next shot) or \"end\" (the range ends there)."
+       },
+       "transition_in_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Length of a gradual transition_in (fade or dissolve), s."
+       },
+       "transition_out_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Length of a gradual transition_out, s."
+       },
+       "colors": {
+        "anyOf": [
+         {
+          "items": {
+           "$ref": "#/$defs/ColorShare"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "output.color_script: dominant colours of the picture, most common first."
+       },
+       "clip_s": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "number"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animated mosaic: [start, end] of the part of the video this panel plays, s."
+       },
+       "speed": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animated mosaic: playback speed of that part (1 = real time, 4 = four times faster)."
+       },
+       "video_s": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "number"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: [start, end] when this panel is on screen in the video, s."
        }
       },
       "required": [
@@ -3325,7 +4091,7 @@
       "additionalProperties": false,
       "properties": {
        "mode": {
-        "description": "\"sharpest\", \"even\", \"all\", \"positions\" or \"panels\".",
+        "description": "\"sharpest\", \"even\", \"best\", \"all\", \"shots\", \"positions\" or \"panels\".",
         "type": "string"
        },
        "range_s": {
@@ -3371,6 +4137,18 @@
         ],
         "default": null,
         "description": "min, p25, median, p75, max of the measured ones (nearest measured value, not interpolated): use it for min_sharpness."
+       },
+       "shots": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/ShotsInfo"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Mode \"shots\": what was found."
        }
       },
       "required": [
@@ -3378,6 +4156,44 @@
        "range_pct",
        "measured",
        "threshold"
+      ],
+      "type": "object"
+     },
+     "ShotsInfo": {
+      "additionalProperties": false,
+      "properties": {
+       "found": {
+        "description": "Shots found in the range.",
+        "type": "integer"
+       },
+       "cuts": {
+        "description": "Transitions between shots that are cuts.",
+        "type": "integer"
+       },
+       "fades": {
+        "description": "... that go through a plain colour (fade out, then cut or fade in).",
+        "type": "integer"
+       },
+       "dissolves": {
+        "description": "... that are dissolves.",
+        "type": "integer"
+       },
+       "threshold": {
+        "description": "select.shot_threshold used.",
+        "type": "number"
+       },
+       "min_shot_s": {
+        "description": "select.min_shot_s used.",
+        "type": "number"
+       }
+      },
+      "required": [
+       "found",
+       "cuts",
+       "fades",
+       "dissolves",
+       "threshold",
+       "min_shot_s"
       ],
       "type": "object"
      },

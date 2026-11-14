@@ -10,7 +10,10 @@ Tools (they all take the same JSON sections; only "input" is required)
                    rotation, or each image's name, format and size
   make_storyboard  pages of panels: grid (contact sheet), storyboard (number above,
                    notes box below), list or strip; PNG / JPG pages or one PDF, plus
-                   a shot list (JSON / CSV) and the full-size frames if asked
+                   a shot list (JSON / CSV) and the full-size frames if asked. Also
+                   animated (MP4, WebM, GIF, WebP): the page with every panel playing
+                   its part of the video (mosaic) or the panels one after another
+                   (animatic); and a colour script (dominant colours per panel)
   extract_frames   chosen video frames at full size, or copies of chosen images
   get_schema       the JSON Schema of every tool with a minimal and a full example
 
@@ -31,7 +34,14 @@ How frames are chosen (select)
   - exact positions (step_pct, step_s, at_pct, at_s, at_frames, at_images,
     at_names): the server seeks to each one, without decoding the whole video.
   - panels[] with positions: each panel says which frame or image it shows.
+  - shots (mode "shots", video): one panel per shot. Cuts are jumps between two
+    consecutive tiny copies that stand out from the movement around them (flashes
+    are left out); dissolves are stretches where the middle frame is the mix of the
+    ends; fades are frames getting steadily closer to a plain (black) frame.
 Images work the same way, with the list order in place of time.
+
+Animated output (output.format mp4, webm, gif or webp) always comes with the still
+pages (PNG), an image of sample frames and the JSON, since an assistant cannot play it.
 
 Decoding uses PyAV (bundled FFmpeg libraries). Phone videos store a rotation and
 phone photos an EXIF orientation; pictures are turned to look the way they were shot.
@@ -42,6 +52,7 @@ bin/LICENSE-ffmpeg.md). `server.py --is-ffmpeg-updated` tells whether it is the
 newest FFmpeg release on the official GitHub repository (github.com/FFmpeg/FFmpeg).
 """
 import base64
+import bisect
 import csv
 import difflib
 import fnmatch
@@ -52,6 +63,7 @@ import math
 import os
 import re
 import shutil
+import statistics
 import string
 import struct
 import subprocess
@@ -60,7 +72,10 @@ import tempfile
 import types as pytypes
 import typing
 import urllib.request
-from dataclasses import dataclass, field
+from array import array
+from collections import deque
+from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Callable, Literal
@@ -83,12 +98,18 @@ try:  # HEIC / HEIF photos (iPhone)
 except Exception:  # pragma: no cover - optional
     HEIF = False
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 REPO = "https://github.com/Eliaxs1900/storyboard-mcp"
 MAX_IMAGES = 1000                 # images in input.images / input.folder
 MAX_PANELS = 500                  # panels in one call
 MAX_PAGES = 200
 MAX_PAGE_PIXELS = 150_000_000     # one page (e.g. 12 000 × 12 500 px)
+ANIMATED = ("mp4", "webm", "gif", "webp")
+MAX_VIDEO_S = 300                 # length of an animated output
+MAX_VIDEO_FRAMES = 3600           # duration × fps
+MAX_VIDEOS = 10                   # mosaic: one video per page
+MAX_SIDE = {"mp4": 3840, "webm": 3840, "gif": 1280, "webp": 1280}     # longest side, px
+DEFAULT_SIDE = {"mp4": 1920, "webm": 1920, "gif": 960, "webp": 960}
 Image.MAX_IMAGE_PIXELS = 200_000_000
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"} | (
     {".heic", ".heif"} if HEIF else set())
@@ -106,20 +127,34 @@ STRINGS = {
            "range": "rango", "measured": "medidos", "dropped": "descartados", "threshold": "umbral",
            "min": "mín", "median": "mediana", "max": "máx",
            "mode": {"sharpest": "el más nítido por tramo", "even": "el del centro de cada tramo", "all": "todos",
-                    "best": "los más nítidos", "positions": "posiciones exactas", "panels": "elegidos en panels"},
+                    "best": "los más nítidos", "positions": "posiciones exactas", "panels": "elegidos en panels",
+                    "shots": "el más nítido de cada plano"},
            "mode_images": {"sharpest": "la más nítida por tramo", "even": "la del centro de cada tramo",
                            "all": "todas", "best": "las más nítidas", "positions": "posiciones exactas",
                            "panels": "elegidas en panels"},
            "notes": {"shot": "PLANO", "camera": "CÁMARA", "action": "ACCIÓN", "dialogue": "DIÁLOGO",
-                     "sound": "SONIDO", "transition": "TRANSICIÓN", "duration_s": "DURACIÓN"}},
+                     "sound": "SONIDO", "transition": "TRANSICIÓN", "duration_s": "DURACIÓN"},
+           "shots": "planos", "cuts": "cortes", "fades": "fundidos", "dissolves": "encadenados",
+           "panel": "viñeta", "panels": "viñetas", "color_script": "Guion de color", "colors": "colores por viñeta",
+           "samples": "Fotogramas de muestra", "loop": "bucle", "speed": "velocidad",
+           "trans": {"cut": "corte", "dissolve": "encadenado", "end": "fin", "start": "inicio",
+                     "fade_out": {"black": "fundido a negro", "white": "fundido a blanco", None: "fundido"},
+                     "fade_in": {"black": "desde negro", "white": "desde blanco", None: "fundido"}}},
     "en": {"frames": "frames", "images": "images", "sharpness": "sharpness", "of": "of",
            "first_frame": "first frame", "last_frame": "last frame", "page": "page {p} of {n}",
            "range": "range", "measured": "measured", "dropped": "dropped", "threshold": "threshold",
            "min": "min", "median": "median", "max": "max",
            "mode": {"sharpest": "sharpest per stretch", "even": "middle of each stretch", "all": "all",
-                    "best": "the sharpest", "positions": "exact positions", "panels": "chosen in panels"},
+                    "best": "the sharpest", "positions": "exact positions", "panels": "chosen in panels",
+                    "shots": "sharpest of each shot"},
            "notes": {"shot": "SHOT", "camera": "CAMERA", "action": "ACTION", "dialogue": "DIALOGUE",
-                     "sound": "SOUND", "transition": "TRANSITION", "duration_s": "DURATION"}},
+                     "sound": "SOUND", "transition": "TRANSITION", "duration_s": "DURATION"},
+           "shots": "shots", "cuts": "cuts", "fades": "fades", "dissolves": "dissolves",
+           "panel": "panel", "panels": "panels", "color_script": "Colour script", "colors": "colours per panel",
+           "samples": "Sample frames", "loop": "loop", "speed": "speed",
+           "trans": {"cut": "cut", "dissolve": "dissolve", "end": "end", "start": "start",
+                     "fade_out": {"black": "fade to black", "white": "fade to white", None: "fade out"},
+                     "fade_in": {"black": "from black", "white": "from white", None: "fade in"}}},
 }
 
 # Theme defaults; every key can be overridden in "style".
@@ -152,18 +187,22 @@ get_schema returns the JSON Schema of every tool with a minimal and a full examp
 All tools take the same JSON sections; only "input" is required:
   input   exactly one of {{"video": path}}, {{"images": [paths]}}, {{"folder": path}}
   select  which frames / images become panels (default: video, the sharpest frame of
-          each of 12 equal stretches; images, all of them in order)
+          each of 12 equal stretches; images, all of them in order; mode "shots": one
+          panel per shot of a video, with its in, out, duration and cut / fade / dissolve)
   panels  notes per panel: shot, camera, action, dialogue, sound, transition, duration_s
   layout  template (grid | storyboard | list | strip), columns, rows, page (auto, A4,
           Letter, 16:9), labels, numbering, guides, language
   style   theme (dark | light) and any colour, font or size
-  output  dir, name, format (png | jpg | pdf), shot_list (json, csv), frames
+  output  dir, name, format (png | jpg | pdf, or animated: mp4 | webm | gif | webp, see
+          output.animation), shot_list (json, csv), frames, color_script
 - Paths: absolute or ~/... (a relative path is resolved against the server's working
   directory). Files go to output.dir, or to a temporary folder named in the answer.
 - Positions: video frames 0..frames-1; seconds from the first frame (0.0); % from the
   first (0) to the last frame or image (100); images by index 0..count-1 or file name.
 - Exact times: step_s / at_s / at_pct (+ snap_s to avoid blurred frames). The sharpest
   of each stretch: count / every_s (irregular times). The N sharpest: mode "best".
+- Animated formats: you cannot play them, so the answer also gives the still pages
+  (PNG), an image of sample frames (videos[].samples) and the JSON; look at those.
 - A mistake in the arguments returns every problem with its path, e.g.
   "layout.columns: Input should be greater than or equal to 1 (got 0)".
 Guide with example images: {REPO}/blob/main/docs/formatos.md"""
@@ -223,18 +262,13 @@ def _ci(lit):
     return Annotated[lit, BeforeValidator(lambda v: canon.get(v.strip().lower(), v) if isinstance(v, str) else v)]
 
 
-RESERVED_FORMATS = ("webp", "gif", "mp4", "webm")
-
-
 def _out_format(v):
     if isinstance(v, str):
-        v = {"jpeg": "jpg"}.get(v.strip().lower(), v.strip().lower())
-        if v in RESERVED_FORMATS:
-            raise ValueError(f'"{v}" is planned for animated output and not available yet; use "png", "jpg" or "pdf"')
+        v = {"jpeg": "jpg", "mpeg4": "mp4", "m4v": "mp4"}.get(v.strip().lower(), v.strip().lower())
     return v
 
 
-OutFormat = Annotated[Literal["png", "jpg", "pdf"], BeforeValidator(_out_format)]
+OutFormat = Annotated[Literal["png", "jpg", "pdf", "mp4", "webm", "gif", "webp"], BeforeValidator(_out_format)]
 
 
 def _rgba(c: str) -> tuple[int, int, int, int]:
@@ -312,14 +346,17 @@ class SelectSpec(Model):
     of 12 equal stretches; images, every image in order. Exact positions (step_pct, step_s,
     at_pct, at_s, at_frames, at_images, at_names) can be combined; when any is given, mode,
     count, every_* and the min_* filters are not used."""
-    mode: _ci(Literal["auto", "sharpest", "even", "best", "all"]) = Field(
+    mode: _ci(Literal["auto", "sharpest", "even", "best", "all", "shots"]) = Field(
         "auto", description='"sharpest": the range is cut into count equal stretches and the least blurry '
                             'frame of each is taken (picks at least half a stretch apart). "even": the frame in '
                             'the middle of each stretch. "best": the count sharpest of the whole range, never '
                             'the same picture twice, in their order (they may all come from one part of a '
                             'video). "all": every frame / image of the range '
-                            f'(at most {MAX_PANELS}). "auto" (default): "sharpest" for video; for images "all", '
-                            'or "sharpest" when count or every_pct is given.')
+                            f'(at most {MAX_PANELS}). "shots" (video): one panel per shot, found by its cuts, '
+                            'fades and dissolves; each panel shows the sharpest frame of its shot and the answer '
+                            'gives each shot\'s start, end, duration and transitions (count is not used). "auto" '
+                            '(default): "sharpest" for video; for images "all", or "sharpest" when count or '
+                            'every_pct is given.')
     count: int = Field(12, ge=1, le=MAX_PANELS, description="How many panels: number of equal stretches "
                                                             '(sharpest, even) or of pictures ("best").')
     every_s: float | None = Field(None, gt=0, description="Video, instead of count: cut the range into stretches "
@@ -364,6 +401,15 @@ class SelectSpec(Model):
                                   "uses 1 unless you set it (0 = only exact repeats).")
     analysis_width: int = Field(480, ge=64, le=4096, description="Width in px at which sharpness is measured "
                                 "(bigger = finer and slower).")
+    shot_threshold: float = Field(20, ge=1, le=255, description='Mode "shots": how big a jump between two '
+                                  "consecutive frames counts as a cut: mean difference 0-255 of small 64×36 "
+                                  "colour copies, which must also be twice the movement around it. Fades and "
+                                  "dissolves need 60 % of it over half a second. Lower (10-15) finds cuts "
+                                  "between similar shots; higher (30+) ignores fast movement.")
+    min_shot_s: float = Field(0.4, ge=0, le=60, description='Mode "shots": shortest shot, s. A cut closer than '
+                              "this to the previous one is not used (flashes, very fast editing).")
+    fades: bool = Field(True, description='Mode "shots": also find gradual transitions (fades from or to a plain '
+                                          "colour, usually black, and dissolves); false = only cuts.")
 
 
 class Panel(Model):
@@ -384,17 +430,22 @@ class Panel(Model):
     dialogue: str | None = Field(None, max_length=2000, description="Dialogue or voice-over.")
     sound: str | None = Field(None, max_length=1000, description="Sound effects or music.")
     transition: str | None = Field(None, max_length=200, description='Transition to the next panel, e.g. '
-                                                                     '"corte", "fundido a negro".')
-    duration_s: float | None = Field(None, gt=0, le=36000, description="Planned duration, in seconds.")
+                                   '"corte", "fundido a negro", "encadenado". The animatic plays it: a text with '
+                                   '"fund" or "fade" is a fade through black, with "encaden" or "dissolv" a '
+                                   "dissolve, anything else a cut.")
+    duration_s: float | None = Field(None, gt=0, le=36000, description="Planned duration, in seconds; the "
+                                                                       "animatic shows the panel this long.")
 
 
 LabelField = Literal["number", "frame", "time", "timecode", "pct", "sharpness", "sharpness_pct", "anchor",
-                     "image", "name", "size"]
+                     "image", "name", "size", "shot_in", "shot_out", "duration", "transition"]
 NoteField = Literal["shot", "camera", "action", "dialogue", "sound", "transition", "duration_s"]
 VIDEO_LABELS = {"frame", "time", "timecode", "anchor"}
 IMAGE_LABELS = {"image", "name", "size"}
+SHOT_LABELS = {"shot_in", "shot_out", "duration", "transition"}
 TEMPLATE_KEYS = {"number", "n", "frame", "frames_total", "time", "timecode", "pct", "pct1", "sharpness",
-                 "sharpness_pct", "anchor", "image", "name", "images_total", "size"}
+                 "sharpness_pct", "anchor", "image", "name", "images_total", "size", "shot_in", "shot_out",
+                 "duration", "transition"}
 VIDEO_KEYS = {"frame", "frames_total", "time", "timecode", "anchor"}
 IMAGE_KEYS = {"image", "name", "images_total", "size"}
 
@@ -407,11 +458,14 @@ class LabelSpec(Model):
         None, description='What the caption says, in this order. Video: number, frame (#123), time (4.1s), '
                           'timecode (0:00:04.1), pct (20%), sharpness, sharpness_pct, anchor (first / last '
                           'frame). Images: number, image (#3), name (file name), size (4032×3024), pct, '
-                          'sharpness, sharpness_pct. Default: video ["number", "time", "frame", "anchor"], '
-                          'images ["number", "name"].')
+                          'sharpness, sharpness_pct. Select mode "shots" only: shot_in (0:00:04.1), shot_out, '
+                          'duration (2.5s), transition (how the shot ends: corte, fundido a negro, '
+                          'encadenado...). Default: video ["number", "time", "frame", "anchor"], mode "shots" '
+                          '["number", "shot_in", "duration", "transition"], images ["number", "name"].')
     template: str | None = Field(None, max_length=200, description='Free text instead of fields, with '
                                  'placeholders: {number} {frame} {frames_total} {time} {timecode} {pct} {pct1} '
-                                 '{sharpness} {sharpness_pct} {anchor} {image} {name} {images_total} {size}. '
+                                 '{sharpness} {sharpness_pct} {anchor} {image} {name} {images_total} {size} '
+                                 '(mode "shots": {shot_in} {shot_out} {duration} {transition}). '
                                  'E.g. "{number}. {timecode}".')
     position: _ci(Literal["top", "bottom"]) = Field("top", description="grid and strip: band at the top or the "
                                                                   "bottom of the picture.")
@@ -557,6 +611,38 @@ def _safe_name(v: str | None) -> str | None:
 FileName = Annotated[str, AfterValidator(_safe_name)]
 
 
+class AnimationSpec(Model):
+    """Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an
+    image of sample frames and the JSON are always written too: they are what an assistant can look at."""
+    kind: _ci(Literal["auto", "mosaic", "animatic"]) = Field(
+        "auto", description='"mosaic" (video input): the page itself, with every panel playing its part of the '
+                            "video in a loop, all at once, and a progress bar under each panel. \"animatic\": the "
+                            "panels one after another, each on screen for its duration, with its number, caption "
+                            "and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. "
+                            '"auto" (default): mosaic for video, animatic for images.')
+    fps: int = Field(12, ge=1, le=30, description="Frames per second of the animation.")
+    duration_s: float | None = Field(
+        None, gt=0, le=MAX_VIDEO_S, description="Length of the video, s. Mosaic: the loop (default: the longest "
+                                                "part a panel plays, at most 8 s); a longer part plays faster, a "
+                                                "shorter one starts over. Animatic: the total (default: the sum of "
+                                                "the panel durations); if given, every duration is scaled to fit. "
+                                                f"At most {MAX_VIDEO_S} s and {MAX_VIDEO_FRAMES} frames "
+                                                "(duration_s × fps).")
+    panel_s: float = Field(2.0, ge=0.1, le=60, description="Animatic: seconds on screen for a panel without a "
+                           'duration of its own (panels[].duration_s, or the shot length in select mode "shots").')
+    transition: _ci(Literal["cut", "fade", "dissolve"]) = Field(
+        "cut", description='Animatic: transition after a panel without one of its own: "cut", "fade" (through '
+                           'black) or "dissolve" (mixes into the next). panels[].transition, and in select mode '
+                           '"shots" the detected transitions, come first.')
+    fade_s: float = Field(0.5, gt=0, le=5, description="Animatic: length of each fade or dissolve, s (never more "
+                                                       "than half a panel).")
+    max_side: int | None = Field(None, ge=64, le=3840, description="Longest side of the video, px; the page or "
+                                 "panel is scaled down to fit. Default: 1920 for mp4 and webm, 960 for gif and "
+                                 "webp (gif and webp: at most 1280).")
+    progress: bool = Field(True, description="Progress bars: one under each panel showing where its part is "
+                                             "(mosaic), or one along the bottom with a mark per panel (animatic).")
+
+
 class StoryboardOutput(Model):
     """Where and how the pages are written."""
     dir: str | None = Field(None, description="Folder for every file (created if missing). Default: "
@@ -564,10 +650,13 @@ class StoryboardOutput(Model):
                                               "the full paths.")
     name: FileName | None = Field(None, max_length=120, description="Base file name, no extension. Default: "
                                   "<input name>_<template>. Several pages add _p1, _p2...")
-    format: OutFormat = Field("png", description='"png" (lossless; keeps a transparent background), "jpg", or '
-                              '"pdf" (one file, one PDF page per page). Any case. "webp", "gif", "mp4" and "webm" '
-                              "are planned for animated output and not available yet.")
-    quality: int = Field(90, ge=1, le=100, description="JPEG quality (jpg, and the pictures inside a pdf).")
+    format: OutFormat = Field("png", description='"png" (lossless; keeps a transparent background), "jpg", '
+                              '"pdf" (one file, one PDF page per page), or animated: "mp4" (H.264), "webm" (VP9), '
+                              '"gif" or "webp" (both loop forever), set up in output.animation; with these the '
+                              "pages are also written as PNG. Any case.")
+    animation: AnimationSpec = Field(default_factory=AnimationSpec)
+    quality: int = Field(90, ge=1, le=100, description="JPEG quality (jpg, and the pictures inside a pdf); also the "
+                                                       "quality of mp4, webm and webp (higher = better and bigger).")
     dpi: int = Field(150, ge=50, le=600, description="Resolution of fixed pages (A4, Letter, 16:9) and of the pdf.")
     shot_list: list[_ci(Literal["json", "csv"])] = Field([], description="Also write the shot list, one row per "
                                                          "panel with its position and notes: <name>_shots.json "
@@ -581,7 +670,12 @@ class StoryboardOutput(Model):
                                             "(video frames as JPEG, images copied unchanged).")
     also_without_labels: bool = Field(False, description="Also write the pages without captions "
                                                          "(<name>_nolabels...).")
-    preview: bool = Field(True, description="Include a small image of page 1 in the answer.")
+    color_script: bool = Field(False, description="Also write the colour script: <name>_colors.png, a strip with "
+                               "the dominant colours of each panel, in order (with each picture above when it "
+                               "fits), and add colors (hex and % of the picture) to each panel in the JSON.")
+    color_count: int = Field(5, ge=1, le=12, description="Colour script: dominant colours per panel.")
+    preview: bool = Field(True, description="Include a small image of page 1 in the answer (and, with an animated "
+                                            "format, of the sample frames).")
 
 
 class FramesOutput(Model):
@@ -670,6 +764,11 @@ class Dropped(Model):
     difference: float | None = Field(None, description="min_difference: the measured difference, 0-255.")
 
 
+class ColorShare(Model):
+    hex: str = Field(description='Colour, "#rrggbb".')
+    pct: float = Field(description="Share of the picture with this colour, %.")
+
+
 class PanelResult(Model):
     n: int = Field(description="Order of the panel, 1 = first.")
     number: str = Field(description="Number printed on the panel.")
@@ -690,6 +789,28 @@ class PanelResult(Model):
                                                "upright (rotation already applied).")
     size: list[int] | None = Field(None, description="[width, height] of file, px.")
     notes: dict[str, Any] | None = Field(None, description="The panel's notes, as given in panels[].")
+    shot_in_s: float | None = Field(None, description='Select mode "shots": when the shot starts (its first '
+                                                      "frame), s.")
+    shot_out_s: float | None = Field(None, description='Mode "shots": when it ends: the next shot\'s first frame, '
+                                                       "or the end of the range, s.")
+    duration_s: float | None = Field(None, description='Mode "shots": shot_out_s - shot_in_s, s.')
+    shot_frames: list[int] | None = Field(None, description='Mode "shots": [first, last] frame of the shot.')
+    transition_in: Literal["start", "cut", "fade_in", "dissolve"] | None = Field(
+        None, description='Mode "shots": how the shot begins: "start" (the range starts there), "cut", "fade_in" '
+                          '(from a plain colour, usually black) or "dissolve" (mixed with the shot before).')
+    transition_out: Literal["cut", "fade_out", "dissolve", "end"] | None = Field(
+        None, description='Mode "shots": how it ends: "cut", "fade_out" (to a plain colour, usually black), '
+                          '"dissolve" (mixed with the next shot) or "end" (the range ends there).')
+    transition_in_s: float | None = Field(None, description="Length of a gradual transition_in (fade or dissolve), s.")
+    transition_out_s: float | None = Field(None, description="Length of a gradual transition_out, s.")
+    colors: list[ColorShare] | None = Field(None, description="output.color_script: dominant colours of the "
+                                                              "picture, most common first.")
+    clip_s: list[float] | None = Field(None, description="Animated mosaic: [start, end] of the part of the video "
+                                                         "this panel plays, s.")
+    speed: float | None = Field(None, description="Animated mosaic: playback speed of that part (1 = real time, "
+                                                  "4 = four times faster).")
+    video_s: list[float] | None = Field(None, description="Animatic: [start, end] when this panel is on screen in "
+                                                          "the video, s.")
 
 
 class PageResult(Model):
@@ -700,8 +821,17 @@ class PageResult(Model):
     panels: list[int] = Field(description="n of the panels on this page.")
 
 
+class ShotsInfo(Model):
+    found: int = Field(description="Shots found in the range.")
+    cuts: int = Field(description="Transitions between shots that are cuts.")
+    fades: int = Field(description="... that go through a plain colour (fade out, then cut or fade in).")
+    dissolves: int = Field(description="... that are dissolves.")
+    threshold: float = Field(description="select.shot_threshold used.")
+    min_shot_s: float = Field(description="select.min_shot_s used.")
+
+
 class SelectionResult(Model):
-    mode: str = Field(description='"sharpest", "even", "all", "positions" or "panels".')
+    mode: str = Field(description='"sharpest", "even", "best", "all", "shots", "positions" or "panels".')
     range_s: list[float] | None = Field(None, description="Video: [start, end] in seconds.")
     range_pct: list[float]
     measured: int = Field(description="Frames or images whose sharpness was measured (only these values are "
@@ -710,6 +840,25 @@ class SelectionResult(Model):
     sharpness_stats: dict[str, float] | None = Field(None, description="min, p25, median, p75, max of the "
                                                                        "measured ones (nearest measured value, "
                                                                        "not interpolated): use it for min_sharpness.")
+    shots: ShotsInfo | None = Field(None, description='Mode "shots": what was found.')
+
+
+class VideoResult(Model):
+    kind: Literal["mosaic", "animatic"]
+    page: int | None = Field(None, description="Mosaic: the page it animates.")
+    path: str = Field(description="The video or animated image.")
+    format: str = Field(description='"mp4", "webm", "gif" or "webp".')
+    codec: str = Field(description='"h264", "vp9", "gif", "webp"...')
+    size: list[int] = Field(description="[width, height] px.")
+    fps: int
+    frames: int
+    duration_s: float
+    bytes: int
+    loop: bool = Field(description="true: it plays forever (gif, webp); mp4 and webm play once unless the player "
+                                   "loops them.")
+    samples: str = Field(description="PNG with sample frames of the video and their times: open it to see what the "
+                                     "video looks like.")
+    sample_times_s: list[float] = Field(description="Times of those frames in the video, s.")
 
 
 class StoryboardResult(Model):
@@ -718,6 +867,9 @@ class StoryboardResult(Model):
     pages_without_labels: list[str] | None = None
     shot_list: dict[str, str] | None = Field(None, description='{"json": path, "csv": path}')
     frames_dir: str | None = None
+    videos: list[VideoResult] | None = Field(None, description="Animated output (output.format mp4, webm, gif or "
+                                                               "webp): one video, or one per page (mosaic).")
+    color_script: str | None = Field(None, description="output.color_script: the PNG strip of dominant colours.")
     panels: list[PanelResult]
     dropped: list[Dropped]
     selection: SelectionResult
@@ -796,6 +948,7 @@ OBJECT_HINTS = {"InputSpec": '{"video": "/abs/clip.mp4"}', "SelectSpec": '{"coun
                 "LayoutSpec": '{"template": "storyboard"}', "StyleSpec": '{"theme": "light"}',
                 "StoryboardOutput": '{"dir": "/abs/folder", "format": "pdf"}', "FramesOutput": '{"dir": "/abs/folder"}',
                 "Panel": '{"shot": "PG", "action": "..."}', "LabelSpec": '{"fields": ["number", "time"]}',
+                "AnimationSpec": '{"kind": "animatic", "fps": 12}',
                 "NumberingSpec": '{"format": "5.{n}"}', "NotesSpec": '{"fields": ["action", "dialogue"]}',
                 "GuidesSpec": '{"aspects": ["2.39:1"], "thirds": true}'}
 
@@ -1005,7 +1158,12 @@ class VideoSource:
         if not c.streams.video:
             c.close()
             raise ToolError(f"input.video: {self.path} has no video stream")
-        return c, c.streams.video[0]
+        st = c.streams.video[0]
+        try:
+            st.thread_type = "AUTO"                # decode on several cores
+        except Exception:
+            pass
+        return c, st
 
     def result(self, with_items: bool = True) -> MediaInfoResult:
         return MediaInfoResult(kind="video", video=self.info)
@@ -1101,6 +1259,52 @@ class VideoSource:
             self.measured.append(sc)
             out.append((i, t, sc, _tiny(im) if tiny else None))
         return out
+
+    def scan(self, t0: float, t1: float, analysis_width: int, scan: "ShotScan"):
+        """Like measure (without keeping the tiny copies), feeding every frame to the shot scan."""
+        out = []
+        for i, t, fr in self.decode(t0, t1):
+            im = self._image(fr, analysis_width)
+            sc = _sharpness(im, analysis_width)
+            self.measured.append(sc)
+            out.append((i, t, sc, None))
+            scan.add(_tiny(im))
+        return out
+
+    def frames_at(self, times: list[float], width: int | None):
+        """(t, picture) of the frame nearest to each time (sorted, no repeats), decoding forward and
+        seeking again over gaps of more than 2 s."""
+        if not times:
+            return
+        c, st = self._open()
+        tb = float(st.time_base) if st.time_base else 0.0
+        off = _offset(st)
+        try:
+            k = 0
+            while k < len(times):
+                seek_t = max(0.0, times[k] - 1.0)
+                if tb:
+                    c.seek(int((seek_t + off) / tb), stream=st, backward=True, any_frame=False)
+                prev = None
+                for fr in c.decode(st):
+                    ft = float(fr.pts * tb) - off if fr.pts is not None else 0.0
+                    while k < len(times) and ft >= times[k] - 1e-6:
+                        near = fr if prev is None or abs(ft - times[k]) <= abs(prev[0] - times[k]) else prev[1]
+                        yield times[k], self._image(near, width)
+                        k += 1
+                    if k >= len(times):
+                        return
+                    prev = (ft, fr)
+                    if tb and ft >= seek_t and times[k] - ft > 2.0:
+                        break                     # far ahead: seek instead of decoding everything between
+                else:                             # end of the video: the rest get the last frame
+                    if prev is None:
+                        raise ToolError(f"no frame found near {times[k]:.2f} s")
+                    while k < len(times):
+                        yield times[k], self._image(prev[1], width)
+                        k += 1
+        finally:
+            c.close()
 
     def fetch(self, picks, sink):
         """Full-size image of each pick, given to sink(pick, image)."""
@@ -1227,6 +1431,227 @@ def make_source(inp: InputSpec):
     return ImageSource([str(p) for p in files], name=folder.name or "imagenes", folder=str(folder))
 
 
+# ============================================================================ shots
+FLAT_STD = 6.0            # a frame whose colour channels all vary less than this is plain (black, white...)
+LINEAR = 0.3              # dissolve: the middle frame is the mix of the ends, give or take 30 % of their difference
+SHOT_WINDOWS_S = (0.5, 1.5)
+
+
+class ShotScan:
+    """What shot detection needs from every frame, measured on its tiny 64×36 copy in one pass:
+    the jump from the frame before (d1) and from two before (d2), the brightness and contrast, and
+    whether the frame is the middle of a dissolve-like window (lin). Memory: a few numbers per
+    frame plus the last 1.5 s of tiny copies."""
+
+    def __init__(self, fps: float, threshold: float, fades: bool):
+        self.fps, self.thr, self.fades = fps, threshold, fades
+        self.ks = sorted({max(2, round(fps * s / 2) * 2) for s in SHOT_WINDOWS_S})    # even window lengths
+        self.ring: deque = deque(maxlen=self.ks[-1] + 1)
+        self.d1, self.d2, self.luma, self.sd = array("f"), array("f"), array("f"), array("f")
+        self.lin = bytearray()
+
+    def add(self, tiny: Image.Image):
+        st, r = ImageStat.Stat(tiny), self.ring
+        self.luma.append(0.299 * st.mean[0] + 0.587 * st.mean[1] + 0.114 * st.mean[2])
+        self.sd.append(max(st.stddev))
+        self.d1.append(_difference(r[-1], tiny) if r else 0.0)
+        self.d2.append(_difference(r[-2], tiny) if len(r) > 1 else 0.0)
+        r.append(tiny)
+        self.lin.append(0)
+        if self.fades:
+            n = len(self.lin)
+            for k in self.ks:
+                if len(r) > k:
+                    a, m, b = r[-1 - k], r[-1 - k // 2], r[-1]
+                    dk = _difference(a, b)
+                    if dk >= 0.6 * self.thr and _difference(m, Image.blend(a, b, 0.5)) <= LINEAR * dk:
+                        self.lin[n - 1 - k // 2] = 1
+
+
+@dataclass
+class _Cut:
+    """A boundary between two shots, as positions in the scan (0 = first frame of the range)."""
+    split: int                  # first frame of the next shot
+    out: str                    # how the shot before ends: cut | fade_out | dissolve
+    into: str                   # how the next one starts: cut | fade_in | dissolve
+    out_n: int = 0              # frames of the shot before taken by the transition
+    in_n: int = 0               # frames of the next shot taken by it
+    out_len: int = 0            # length to report (a dissolve: the whole of it)
+    in_len: int = 0
+    color: str | None = None    # fades: "black", "white" or None (another plain colour)
+    strength: float = 0.0
+
+
+def _find_cuts(s: ShotScan, min_shot_s: float) -> tuple[list[_Cut], tuple, tuple]:
+    """Boundaries between shots, and how the range starts and ends: ("start" | "fade_in", frames,
+    colour) and ("end" | "fade_out", frames, colour)."""
+    n, fps, T = len(s.d1), s.fps, s.thr
+    d1, d2, luma, sd = s.d1, s.d2, s.luma, s.sd
+    flat = [v < FLAT_STD for v in sd]
+    covered = bytearray(n)
+    cuts: list[_Cut] = []
+    head, tail = ("start", 0, None), ("end", 0, None)
+
+    def mark(lo: int, hi: int):
+        for j in range(max(0, lo), min(n, hi + 1)):
+            covered[j] = 1
+
+    def energy(j: int, ref: float) -> float:          # how far a frame is from the plain colour
+        return abs(luma[j] - ref) + sd[j]
+
+    def walk(j0: int, step: int, ref: float) -> tuple[int, float, float]:
+        """Frames leading away from a plain run while they get further from its colour, allowing short
+        plateaus (encoders repeat frames): (frames, gain, biggest single step). A fade gains gradually;
+        a cut gains almost everything in its first step."""
+        best, cur, flat_steps, big = j0, j0, 0, 0.0
+        while 0 <= cur + step < n and abs(cur + step - j0) <= 5 * fps:
+            nxt = cur + step
+            e_next, e_best = energy(nxt, ref), energy(best, ref)
+            if e_next > e_best + 0.15:
+                big = max(big, e_next - e_best)
+                best, flat_steps = nxt, 0
+            elif e_next < e_best - 1.0 or flat_steps >= 3:
+                break
+            else:
+                flat_steps += 1
+            cur = nxt
+        return abs(best - j0), energy(best, ref) - energy(j0, ref), big
+
+    def inside(j0: int, step: int, limit: int, ref: float) -> int:
+        """Plain frames at the edge of the run that are still fading (getting closer to its colour)."""
+        k = 0
+        while k < limit and energy(j0 + k * step, ref) > energy(j0 + (k + 1) * step, ref) + 0.15:
+            k += 1
+        return k
+
+    # 1. plain runs (black, white...): a fade out, a fade in, or a cut, on each side
+    i = 0
+    while i < n:
+        if not flat[i]:
+            i += 1
+            continue
+        a = i
+        while i + 1 < n and flat[i + 1]:
+            i += 1
+        b, i = i, i + 1
+        ref = statistics.median(luma[a:b + 1])
+        color = "black" if ref < 64 else "white" if ref > 192 else None
+        w_out, g_out, big_out = walk(a, -1, ref) if a > 0 else (0, 0.0, 0.0)
+        w_in, g_in, big_in = walk(b, 1, ref) if b < n - 1 else (0, 0.0, 0.0)
+        f_out = s.fades and w_out >= 2 and g_out >= 6 and big_out < 0.6 * g_out
+        f_in = s.fades and w_in >= 2 and g_in >= 6 and big_in < 0.6 * g_in
+        i_out = inside(a, 1, b - a, ref) if f_out else 0
+        i_in = inside(b, -1, b - a - i_out, ref) if f_in else 0
+        n_out, n_in = (w_out + i_out if f_out else 0), (w_in + i_in if f_in else 0)
+        mark(a - n_out - 1, b + n_in + 1)
+        if a == 0 and b == n - 1:
+            continue                                   # the whole range is plain: one shot
+        if a == 0:
+            head = ("fade_in", n_in, color) if f_in else ("start", 0, None)
+            continue
+        if b == n - 1:
+            tail = ("fade_out", n_out, color) if f_out else ("end", 0, None)
+            continue
+        lo, hi = a + i_out, b - i_in                   # the plain frames held between the two shots
+        cuts.append(_Cut((lo + hi + 1) // 2, "fade_out" if f_out else "cut", "fade_in" if f_in else "cut",
+                         n_out, n_in, n_out, n_in, color, 1000.0))
+    # 2. cuts: a jump that stands out from the movement around it and is not a flash
+    w = max(3, round(fps / 4))
+    for i in range(1, n):
+        if d1[i] < T or covered[i]:
+            continue
+        around = sorted(d1[j] for j in range(max(1, i - w), min(n, i + w + 1)) if abs(j - i) > 1)
+        if around and d1[i] < 2 * around[len(around) // 2]:
+            continue
+        if (i + 1 < n and d2[i + 1] < 0.5 * d1[i]) or (i >= 2 and d2[i] < 0.5 * d1[i]):
+            continue                                   # one odd frame (a flash): the picture comes back
+        cuts.append(_Cut(i, "cut", "cut", strength=d1[i]))
+        mark(i - 1, i + 1)
+    # 3. dissolves: runs of windows whose middle frame is the mix of their ends
+    k0 = s.ks[0]
+    i = 0
+    while i < n:
+        if not s.lin[i] or covered[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and not covered[j + 1] and (s.lin[j + 1] or (j + 2 < n and s.lin[j + 2])):
+            j += 1
+        run, c = j - i + 1, (i + j) // 2
+        est = run / 0.7 if run < 0.7 * k0 else run + 0.3 * k0       # length the run implies
+        base = statistics.median(d2[max(2, c - 2):c + 3]) if c > 1 else 0.0
+        lo = hi = c
+        lim = round(1.5 * fps)
+        while lo - 1 > 1 and d2[lo - 1] >= 0.5 * base and d1[lo - 1] < T and c - lo < lim:
+            lo -= 1
+        while hi + 1 < n and d2[hi + 1] >= 0.5 * base and d1[hi + 1] < T and hi - c < lim:
+            hi += 1
+        length = round(min(max(hi - lo + 1, 0.7 * est), 1.4 * est))
+        if run >= 3 and length >= max(3, 0.2 * fps):
+            cuts.append(_Cut(c, "dissolve", "dissolve", length // 2, length - length // 2, length, length,
+                             strength=0.8 * T))
+        elif max(d1[max(1, c - 2):c + 3]) >= 0.4 * T:                # a blended frame or two at a cut
+            cuts.append(_Cut(c, "cut", "cut", strength=0.6 * T))
+        mark(c - length // 2 - 1, c + length // 2 + 1)
+        i = j + 1
+    # 4. no shot shorter than min_shot_s: of two boundaries too close, keep the stronger
+    m = max(1, round(min_shot_s * fps))
+    kept: list[_Cut] = []
+    for cu in sorted(cuts, key=lambda x: x.split):
+        if cu.split < m or n - cu.split < m:
+            continue
+        if kept and cu.split - kept[-1].split < m:
+            if cu.strength > kept[-1].strength:
+                kept[-1] = cu
+            continue
+        kept.append(cu)
+    return kept, head, tail
+
+
+@dataclass
+class ShotData:
+    first: int                  # frame numbers
+    last: int
+    t_in: float
+    t_out: float
+    trans_in: str
+    trans_out: str
+    in_s: float = 0.0
+    out_s: float = 0.0
+    color_in: str | None = None
+    color_out: str | None = None
+
+
+def _make_shots(meta: list, s: ShotScan, cuts: list[_Cut], head: tuple, tail: tuple, thr: float,
+                t_end: float) -> list[tuple[int, ShotData]]:
+    """(position in meta of the frame to show, shot) per shot: the sharpest frame clear of the
+    transitions, at or above the sharpness threshold when the shot has one."""
+    n, fps = len(meta), s.fps
+    splits = [0] + [c.split for c in cuts] + [n]
+    out = []
+    for k in range(len(splits) - 1):
+        a, b = splits[k], splits[k + 1] - 1
+        cin = cuts[k - 1] if k > 0 else None
+        cout = cuts[k] if k < len(cuts) else None
+        if cin:
+            trans_in, in_n, in_len, col_in = cin.into, cin.in_n, cin.in_len, cin.color
+        else:
+            trans_in, in_n, in_len, col_in = head[0], head[1], head[1], head[2]
+        if cout:
+            trans_out, out_n, out_len, col_out = cout.out, cout.out_n, cout.out_len, cout.color
+        else:
+            trans_out, out_n, out_len, col_out = tail[0], tail[1], tail[1], tail[2]
+        t_in, t_out = meta[a][1], (meta[b + 1][1] if b + 1 < n else t_end)
+        core = [j for j in range(a + in_n, b - out_n + 1) if s.sd[j] >= FLAT_STD] or list(range(a, b + 1))
+        good = [j for j in core if meta[j][2] >= thr] or core
+        rep = max(good, key=lambda j: meta[j][2])
+        out.append((rep, ShotData(meta[a][0], meta[b][0], t_in, t_out, trans_in, trans_out,
+                                  in_len / fps if trans_in in ("fade_in", "dissolve") else 0.0,
+                                  out_len / fps if trans_out in ("fade_out", "dissolve") else 0.0,
+                                  col_in, col_out)))
+    return out
+
+
 # ============================================================================ selection
 @dataclass(eq=False)
 class Pick:
@@ -1237,6 +1662,8 @@ class Pick:
     note: Panel | None = None
     image: Image.Image | None = None
     exact_index: bool = True       # key is the decoded frame index (not estimated from time)
+    shot: ShotData | None = None   # mode "shots"
+    span: tuple[float, float] | None = None    # part of the video it stands for: its stretch or shot, s
 
 
 @dataclass
@@ -1251,6 +1678,7 @@ class Chosen:
     stats: dict[str, float] | None
     pct_of: Callable
     warnings: list[str] = field(default_factory=list)
+    shots: ShotsInfo | None = None
 
 
 def _given(sel: SelectSpec, name: str) -> bool:
@@ -1261,6 +1689,7 @@ def _given(sel: SelectSpec, name: str) -> bool:
 EXACT_FIELDS = ("step_pct", "step_s", "at_pct", "at_s", "at_frames", "at_images", "at_names")
 VIDEO_ONLY = ("every_s", "step_s", "at_s", "at_frames", "snap_s", "start_s", "end_s", "min_gap_s")
 IMAGE_ONLY = ("at_images", "at_names")
+SHOT_FIELDS = ("shot_threshold", "min_shot_s", "fades")
 PANEL_POS = ("frame", "at_s", "at_pct", "image", "image_name")
 
 
@@ -1268,6 +1697,9 @@ def check_selection(kind: str, sel: SelectSpec, panels: list[Panel]) -> list[str
     """Problems that depend on the input kind or on several fields at once."""
     p = []
     if kind == "images":
+        if sel.mode == "shots":
+            p.append('select.mode: "shots" finds the shots of a video; with images use "all", "sharpest", '
+                     '"even" or "best"')
         for f in VIDEO_ONLY:
             if _given(sel, f):
                 p.append(f"select.{f}: only for video input; with images use count, every_pct, step_pct, "
@@ -1345,6 +1777,36 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
                            "min_gap_s", "min_difference") if f in sel.model_fields_set]
     if (pos_panels or exact) and ignored:
         warnings.append(f"select.{', select.'.join(ignored)}: not used with exact positions")
+    shot_set = [f for f in SHOT_FIELDS if f in sel.model_fields_set]
+    if shot_set and (sel.mode != "shots" or pos_panels or exact):
+        warnings.append(f"select.{', select.'.join(shot_set)}: only used with mode \"shots\"")
+
+    # ---- one panel per shot
+    if video and sel.mode == "shots" and not (pos_panels or exact):
+        skip = [f for f in ("count", "every_s", "every_pct", "min_gap_s", "min_difference")
+                if f in sel.model_fields_set]
+        if skip:
+            warnings.append(f"select.{', select.'.join(skip)}: not used with mode \"shots\" (one panel per shot)")
+        scan = ShotScan(src.fps, sel.shot_threshold, sel.fades)
+        meta = src.scan(t0, t1, sel.analysis_width, scan)
+        if not meta:
+            raise ToolError("select: no frames in the requested range")
+        sh = [m[2] for m in meta]
+        thr = max(sel.min_sharpness, _percentile(sh, sel.drop_blurriest_pct) if sel.drop_blurriest_pct > 0 else 0.0)
+        cuts, head, tail = _find_cuts(scan, sel.min_shot_s)
+        shots = _make_shots(meta, scan, cuts, head, tail, thr, meta[-1][1] + 1.0 / src.fps)
+        if len(shots) > MAX_PANELS:
+            raise ToolError(f"select: {len(shots)} shots found; the limit is {MAX_PANELS} panels per call. Do the "
+                            f"video in parts with start_s and end_s (about {MAX_PANELS * (t1 - t0) / len(shots):.0f}"
+                            " s each), or raise shot_threshold / min_shot_s")
+        picks = [Pick(key=meta[j][0], t=meta[j][1], sharpness=meta[j][2], shot=sd, span=(sd.t_in, sd.t_out))
+                 for j, sd in shots]
+        _notes_by_order(picks, panels, warnings)
+        kinds = ["dissolve" if c.out == "dissolve" else "fade" if "fade" in c.out + c.into else "cut" for c in cuts]
+        info = ShotsInfo(found=len(shots), cuts=kinds.count("cut"), fades=kinds.count("fade"),
+                         dissolves=kinds.count("dissolve"), threshold=sel.shot_threshold, min_shot_s=sel.min_shot_s)
+        return Chosen(picks, [], "shots", rng_s, rng_pct, len(sh), round(thr, 1), _stats(sh), pct_of, warnings,
+                      shots=info)
 
     # ---- panels choose themselves / exact positions
     if pos_panels or exact:
@@ -1468,6 +1930,7 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
 
     dropped: list[Dropped] = []
     kept: list = []
+    span_of: dict[int, tuple[float, float]] = {}
     asked, empty = 0, 0
     if mode == "all":
         for m in meta:
@@ -1540,6 +2003,7 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
                     break
             if pick:
                 kept.append(pick)
+                span_of[pick[0]] = (bounds[k], min(bounds[k + 1], hi))
             else:
                 dropped.append(Dropped(**ref(order[0]), **(first_why or {"reason": "min_difference"})))
     if not kept:
@@ -1565,7 +2029,7 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
         if mode == "best" and not why:
             why.append("there are not that many different pictures")
         warnings.append(f"select: {asked} panels asked for, {len(kept)} given: " + "; ".join(why))
-    picks = [Pick(key=m[0], t=m[1], sharpness=m[2], tiny=m[3]) for m in kept]
+    picks = [Pick(key=m[0], t=m[1], sharpness=m[2], tiny=m[3], span=span_of.get(m[0])) for m in kept]
     _notes_by_order(picks, panels, warnings)
     return Chosen(picks, dropped, mode, rng_s, rng_pct, len(sh), round(thr, 1), _stats(sh), pct_of, warnings)
 
@@ -1882,12 +2346,21 @@ def _caption_line(d, x, y, w, v: View, look: Look, show_caption: bool):
         d.text((x + w, base), _ellipsize(d, v.caption, fc, w - nw), font=fc, fill=look.text2, anchor="rs")
 
 
+def _cell_overlay(v: View, geo: Geo, look: Look, L: LayoutSpec, with_labels: bool) -> Image.Image | None:
+    """What is drawn over a picture (guides, caption band), on a transparent layer; None if nothing."""
+    over = None
+    clear = Image.new("RGBA", (geo.panel_w, geo.panel_h), (0, 0, 0, 0))
+    if L.guides.aspects or L.guides.safe_zone or L.guides.thirds:
+        over = _draw_guides(clear, L.guides, look, look.font(max(9, look.label_size * 0.75), bold=True))
+    if TEMPLATES[geo.template]["caption"] == "overlay" and with_labels and L.label.show and v.caption:
+        over = _overlay_label(over or clear, v.caption, look, L.label.position)
+    return over
+
+
 def _draw_cell(layer, x, y, v: View, geo: Geo, look: Look, L: LayoutSpec, with_labels: bool, row_h: int):
     d = ImageDraw.Draw(layer)
     bw = look.border_width
-    pic = _draw_guides(v.picture, L.guides, look, look.font(max(9, look.label_size * 0.75), bold=True))
-    if TEMPLATES[geo.template]["caption"] == "overlay" and with_labels and L.label.show and v.caption:
-        pic = _overlay_label(pic, v.caption, look, L.label.position)
+    over = _cell_overlay(v, geo, look, L, with_labels)
     if geo.template == "list":
         px, py = x, y
         tx = x + geo.panel_w + geo.gap
@@ -1907,11 +2380,13 @@ def _draw_cell(layer, x, y, v: View, geo: Geo, look: Look, L: LayoutSpec, with_l
     if bw:
         d.rectangle((px - bw, py - bw, px + geo.panel_w + bw - 1, py + geo.panel_h + bw - 1), outline=look.border,
                     width=bw)
-    return pic, (px, py)
+    return over, (px, py)
 
 
 def render_pages(views: list[View], geo: Geo, look: Look, L: LayoutSpec, header: tuple[str, str],
-                 footer: str, strings: dict, with_labels: bool, cut: set | None = None) -> list[Image.Image]:
+                 footer: str, strings: dict, with_labels: bool, cut: set | None = None, parts: bool = False) -> list:
+    """The pages as images. parts=True: for each page, (the page without the pictures, [(view, (x, y),
+    overlay or None)]), to animate the pictures."""
     per_page = geo.cols * geo.rows_per_page
     chunks = [views[k:k + per_page] for k in range(0, len(views), per_page)]
     pages = []
@@ -1959,7 +2434,7 @@ def render_pages(views: list[View], geo: Geo, look: Look, L: LayoutSpec, header:
         for r, rh in zip(rows, row_hs):
             x = x0
             for v in r:
-                pastes.append(_draw_cell(layer, x, y, v, geo, look, L, with_labels, rh))
+                pastes.append((v, *_draw_cell(layer, x, y, v, geo, look, L, with_labels, rh)))
                 x += cell_w + geo.gap
             y += rh + geo.gap
         if geo.footer_h:
@@ -1978,10 +2453,486 @@ def render_pages(views: list[View], geo: Geo, look: Look, L: LayoutSpec, header:
             if page_txt:
                 d.text((right, fy + geo.pad), page_txt, font=fs, fill=look.text2, anchor="ra")
         page = Image.alpha_composite(page, layer)
-        for pic, (px, py) in pastes:
-            page.alpha_composite(pic, (px, py))
+        if parts:
+            pages.append((page, [(v, xy, over) for v, over, xy in pastes]))
+            continue
+        for v, over, (px, py) in pastes:
+            page.alpha_composite(v.picture if over is None else Image.alpha_composite(v.picture, over), (px, py))
         pages.append(page)
     return pages
+
+
+# ============================================================================ animation
+CODEC_NAMES = {"libx264": "h264", "h264_videotoolbox": "h264", "mpeg4": "mpeg4", "libvpx-vp9": "vp9",
+               "libvpx": "vp8", "libwebp_anim": "webp", "gif": "gif"}
+
+
+@lru_cache(maxsize=None)
+def _has_encoder(name: str) -> bool:
+    try:
+        av.codec.Codec(name, "w")
+        return True
+    except Exception:
+        return False
+
+
+def _encoder(fmt: str, quality: int, size: tuple[int, int], fps: int) -> tuple[str, dict, int | None]:
+    """(encoder, options, bit rate) for mp4, webm or webp: the best one this PyAV has."""
+    rate = int(size[0] * size[1] * fps * 0.12 * (0.4 + quality / 100))     # for encoders without a quality mode
+    if fmt == "mp4":
+        if _has_encoder("libx264"):
+            return "libx264", {"crf": str(round(min(40, max(14, 40 - 0.22 * quality)))), "preset": "medium"}, None
+        return ("h264_videotoolbox" if _has_encoder("h264_videotoolbox") else "mpeg4"), {}, rate
+    if fmt == "webm":
+        crf = str(round(min(50, max(15, 52 - 0.25 * quality))))
+        if _has_encoder("libvpx-vp9"):
+            return "libvpx-vp9", {"crf": crf, "b": "0", "deadline": "good", "cpu-used": "4", "row-mt": "1"}, None
+        return "libvpx", {"crf": crf}, rate
+    return "libwebp_anim", {"quality": str(quality), "lossless": "0"}, None
+
+
+def _pull(sink) -> list:
+    out = []
+    while True:
+        try:
+            out.append(sink.pull())
+        except (av.error.BlockingIOError, av.error.EOFError):
+            return out
+
+
+def _write_gif(path: Path, size: tuple[int, int], fps: int, n: int, frame: Callable, palette_from: list[int]):
+    """GIF with one palette for the whole animation: FFmpeg's palettegen over some frames, then
+    paletteuse with ordered dithering (it stays still where the picture does)."""
+    w, h = size
+    tb = Fraction(1, fps)
+    g = av.filter.Graph()
+    src = g.add_buffer(width=w, height=h, format="rgb24", time_base=tb)
+    gen, sink = g.add("palettegen", "max_colors=256:stats_mode=full"), g.add("buffersink")
+    src.link_to(gen)
+    gen.link_to(sink)
+    g.configure()
+    for k, j in enumerate(palette_from):
+        vf = av.VideoFrame.from_image(frame(j))
+        vf.pts, vf.time_base = k, tb
+        src.push(vf)
+    src.push(None)
+    palette = _pull(sink)[-1]
+    g = av.filter.Graph()
+    src = g.add_buffer(width=w, height=h, format="rgb24", time_base=tb)
+    pal = g.add_buffer(width=palette.width, height=palette.height, format=palette.format.name, time_base=tb)
+    use, sink = g.add("paletteuse", "dither=bayer:bayer_scale=4:diff_mode=rectangle"), g.add("buffersink")
+    src.link_to(use, 0, 0)
+    pal.link_to(use, 0, 1)
+    use.link_to(sink)
+    g.configure()
+    palette.pts, palette.time_base = 0, tb
+    pal.push(palette)
+    pal.push(None)
+    with av.open(str(path), "w", format="gif", options={"loop": "0"}) as c:
+        st = c.add_stream("gif", rate=fps)
+        st.width, st.height, st.pix_fmt = w, h, "pal8"
+
+        def put(frames):
+            for f in frames:
+                for pkt in st.encode(f):
+                    c.mux(pkt)
+        for j in range(n):
+            vf = av.VideoFrame.from_image(frame(j))
+            vf.pts, vf.time_base = j, tb
+            src.push(vf)
+            put(_pull(sink))
+        src.push(None)
+        put(_pull(sink))
+        for pkt in st.encode():
+            c.mux(pkt)
+    return "gif"
+
+
+def _write_video(path: Path, fmt: str, size: tuple[int, int], fps: int, quality: int, n: int,
+                 frame: Callable[[int], Image.Image], palette_from: list[int]) -> str:
+    """Encode frames 0..n-1 (frame(j): RGB image of exactly size) into path; returns the codec."""
+    if fmt == "gif":
+        return _write_gif(path, size, fps, n, frame, palette_from)
+    name, opts, rate = _encoder(fmt, quality, size, fps)
+    tb = Fraction(1, fps)
+    copts = {"movflags": "+faststart"} if fmt == "mp4" else {"loop": "0"} if fmt == "webp" else {}
+    with av.open(str(path), "w", format=fmt, options=copts) as c:
+        st = c.add_stream(name, rate=fps)
+        st.width, st.height, st.pix_fmt = size[0], size[1], "yuv420p"
+        if rate:
+            st.bit_rate = rate
+        st.options = opts
+        for j in range(n):
+            vf = av.VideoFrame.from_image(frame(j))
+            vf.pts, vf.time_base = j, tb
+            for pkt in st.encode(vf):
+                c.mux(pkt)
+        for pkt in st.encode():
+            c.mux(pkt)
+    return CODEC_NAMES.get(name, name)
+
+
+def _even(v: int) -> int:
+    return max(2, v - v % 2)
+
+
+def _jpeg(im: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    _flatten(im).save(buf, "JPEG", quality=92)
+    return buf.getvalue()
+
+
+def _unjpeg(b: bytes) -> Image.Image:
+    return Image.open(io.BytesIO(b)).convert("RGB")
+
+
+def _rgb(c: tuple) -> tuple[int, int, int]:
+    """An RGBA colour as seen over white (what a video shows)."""
+    a = c[3] / 255 if len(c) > 3 else 1.0
+    return tuple(round(c[k] * a + 255 * (1 - a)) for k in range(3))
+
+
+def _check_frames(n: int, fps: int, where: str):
+    if n > MAX_VIDEO_FRAMES:
+        raise ToolError(f"{where}: the video would have {n} frames ({n / fps:.0f} s × {fps} fps); the limit is "
+                        f"{MAX_VIDEO_FRAMES}. Lower output.animation.fps or duration_s")
+
+
+def _bar(pic: Image.Image, frac: float, mark: float | None, h: int, fill, tick):
+    """Progress bar along the bottom of a picture: done part in fill, mark = where the still frame is."""
+    w, ph = pic.size
+    y0 = ph - h
+    pic.paste((0, 0, 0), (0, y0, w, ph), Image.new("L", (w, h), 150))
+    d = ImageDraw.Draw(pic)
+    if frac > 0:
+        d.rectangle((0, y0, max(0, round(frac * w) - 1), ph - 1), fill=fill)
+    if mark is not None:
+        x = round(mark * (w - 1))
+        d.rectangle((max(0, x - 1), max(0, y0 - h // 2), min(w - 1, x + 1), ph - 1), fill=tick)
+
+
+def _samples_image(items: list[tuple[str, Image.Image]], look: Look, title: str, cols: int) -> Image.Image:
+    """Sample frames of a video in a grid, each with its time: a still to look at instead of the video."""
+    tw = min(480, max(im.width for _, im in items))
+    thumbs = []
+    for _, im in items:
+        t = im.copy()
+        t.thumbnail((tw, tw * 4), Image.LANCZOS)
+        thumbs.append(t)
+    th, fs, pad = max(t.height for t in thumbs), 18, 16
+    cols = max(1, min(cols, len(items)))
+    rows = math.ceil(len(items) / cols)
+    head = round(fs * 2.2)
+    W, H = pad + cols * (tw + pad), pad + head + rows * (th + round(fs * 1.7) + pad)
+    page = Image.new("RGB", (W, H), _rgb(look.bg))
+    d = ImageDraw.Draw(page)
+    d.text((pad, pad), _ellipsize(d, title, look.font(fs * 1.15, bold=True), W - 2 * pad),
+           font=look.font(fs * 1.15, bold=True), fill=_rgb(look.text))
+    for i, ((cap, _), t) in enumerate(zip(items, thumbs)):
+        r, c = divmod(i, cols)
+        x, y = pad + c * (tw + pad), pad + head + r * (th + round(fs * 1.7) + pad)
+        page.paste(t, (x + (tw - t.width) // 2, y))
+        d.rectangle((x + (tw - t.width) // 2 - 1, y - 1, x + (tw + t.width) // 2, y + t.height), outline=_rgb(look.border))
+        d.text((x, y + th + 5), cap, font=look.font(fs), fill=_rgb(look.text2))
+    return page
+
+
+def _spans(picks: list[Pick], end: float, min_s: float = 1.0) -> list[tuple[float, float]]:
+    """Part of the video each panel stands for: its stretch or shot; otherwise from its frame to the
+    next panel's in time (the last one, to the end of the range), at least min_s long."""
+    order = sorted(range(len(picks)), key=lambda k: picks[k].t or 0.0)
+    after = {a: picks[b].t for a, b in zip(order, order[1:])}
+    out = []
+    for k, p in enumerate(picks):
+        if p.span:
+            out.append(p.span)
+            continue
+        a, b = p.t or 0.0, after.get(k, end)
+        if b - a < min_s:
+            b = min(end, a + min_s)
+            a = max(0.0, min(a, b - min_s))
+        out.append((a, b))
+    return out
+
+
+def _decode_width(src: "VideoSource", w: int, h: int) -> int:
+    """Width (as stored) to decode at so that the upright picture covers a w × h box."""
+    dw, dh = src.info.displayed_size
+    s = max(w / max(1, dw), h / max(1, dh))
+    return max(16, min(src.info.size[0], round(src.info.size[0] * s) + 2))
+
+
+def make_mosaic(src, picks: list[Pick], end: float, parts: list, geo: Geo, look: Look, L: LayoutSpec,
+                O: StoryboardOutput, name: str, out_dir: Path, strings: dict):
+    """The pages with every panel playing its part of the video at once. Returns (videos, {panel
+    index: (clip [start, end], speed)})."""
+    A, fps = O.animation, O.animation.fps
+    spans = _spans(picks, end)
+    D = A.duration_s or min(8.0, max(1.0, max(b - a for a, b in spans)))
+    F = max(1, round(D * fps))
+    _check_frames(F, fps, "output.animation.duration_s")
+    if len(parts) > MAX_VIDEOS:
+        raise ToolError(f"output.format: a mosaic is one video per page and there would be {len(parts)} pages; the "
+                        f"limit is {MAX_VIDEOS}. Use layout.page \"auto\" (one page) or fewer panels")
+    side = A.max_side or DEFAULT_SIDE[O.format]
+    bg = _rgb(look.bg) + (255,)
+    clips: dict[int, tuple[list[float], float]] = {}
+    videos = []
+    for pno, (base, slots) in enumerate(parts, 1):
+        s = min(1.0, side / max(base.size))
+        W, H = _even(round(base.width * s)), _even(round(base.height * s))
+        canvas = _flatten(base).resize((W, H), Image.LANCZOS)
+        bar_h = max(3, round(min(W, H) * 0.008))
+        tiles = []
+        for v, (px, py), over in slots:
+            k = v.n - 1
+            x0, y0 = round(px * s), round(py * s)
+            pw, ph = max(2, round((px + geo.panel_w) * s) - x0), max(2, round((py + geo.panel_h) * s) - y0)
+            ov = None if over is None else over if over.size == (pw, ph) else over.resize((pw, ph), Image.LANCZOS)
+            a, b = spans[k]
+            length = max(b - a, 1e-6)
+            if length <= D:                        # real time, starting over when it ends
+                speed, times = 1.0, [a + (j / fps) % length for j in range(F)]
+            else:                                  # faster, to fit the loop
+                speed, times = length / D, [a + length * j / F for j in range(F)]
+            pics = {t: _jpeg(_fit_picture(im, pw, ph, L.fit, bg, look.sharpen))
+                    for t, im in src.frames_at(sorted(set(times)), _decode_width(src, pw, ph))}
+            still = min(1.0, max(0.0, ((picks[k].t or a) - a) / length))
+            tiles.append((x0, y0, ov, times, pics, a, length, still))
+            clips[k] = ([round(a, 3), round(b, 3)], round(speed, 2))
+
+        def frame(j: int, canvas=canvas, tiles=tiles, bar_h=bar_h) -> Image.Image:
+            im = canvas.copy()
+            for x0, y0, ov, times, pics, a, length, still in tiles:
+                pic = _unjpeg(pics[times[j]])
+                if ov is not None:
+                    pic.paste(ov, (0, 0), ov)
+                if A.progress:
+                    _bar(pic, (times[j] - a) / length, still, bar_h, _rgb(look.accent), _rgb(look.text))
+                im.paste(pic, (x0, y0))
+            return im
+
+        path = out_dir / f"{name}{f'_p{pno}' if len(parts) > 1 else ''}.{O.format}"
+        codec = _write_video(path, O.format, (W, H), fps, O.quality, F, frame,
+                             sorted({round(i * (F - 1) / 23) for i in range(24)}))
+        js = sorted({round(i * (F - 1) / 5) for i in range(6)})
+        title = (f"{strings['samples']} · {path.name} · {W}×{H} · {fps} fps · {F / fps:.1f} s "
+                 f"({strings['loop']})")
+        spath = path.with_name(path.stem + "_samples.png")
+        _samples_image([(f"{j / fps:.2f} s", frame(j)) for j in js], look, title, 3).save(spath, optimize=True)
+        videos.append(VideoResult(kind="mosaic", page=pno, path=str(path), format=O.format, codec=codec,
+                                  size=[W, H], fps=fps, frames=F, duration_s=round(F / fps, 3),
+                                  bytes=path.stat().st_size, loop=O.format in ("gif", "webp"), samples=str(spath),
+                                  sample_times_s=[round(j / fps, 2) for j in js]))
+    return videos, clips
+
+
+def _transition_of(text: str) -> str:
+    t = text.lower()
+    if any(w in t for w in ("encaden", "dissolv", "disolv", "cross", "mix")):
+        return "dissolve"
+    if any(w in t for w in ("fund", "fade")):
+        return "fade"
+    return "cut"
+
+
+@dataclass
+class _Slot:
+    """One panel in the animatic: when it is on screen and how it comes and goes (s)."""
+    start: float
+    end: float
+    fade_in: float = 0.0        # from black
+    fade_out: float = 0.0       # to black
+    mix_in: float = 0.0         # dissolve with the panel before (whole length, centred on start)
+    mix_out: float = 0.0        # dissolve with the next one (centred on end)
+
+
+def animatic_timeline(picks: list[Pick], A: AnimationSpec) -> tuple[list[_Slot], float]:
+    """Duration and transitions of every panel: panels[].duration_s / transition first, then what
+    shot detection found, then panel_s / transition; scaled to duration_s if given."""
+    n = len(picks)
+    durs = [p.note.duration_s if p.note and p.note.duration_s else
+            (p.shot.t_out - p.shot.t_in) if p.shot else A.panel_s for p in picks]
+    slots = [_Slot(0.0, d) for d in durs]
+    for k, p in enumerate(picks):
+        user = p.note.transition if p.note and p.note.transition else None
+        if user is None and p.shot:                      # what the video does
+            if k == 0 and p.shot.trans_in == "fade_in":
+                slots[k].fade_in = p.shot.in_s
+            if p.shot.trans_out == "dissolve" and k + 1 < n:
+                slots[k].mix_out = slots[k + 1].mix_in = p.shot.out_s
+            elif p.shot.trans_out == "fade_out":
+                slots[k].fade_out = p.shot.out_s
+            if k + 1 < n and picks[k + 1].shot and picks[k + 1].shot.trans_in == "fade_in":
+                slots[k + 1].fade_in = picks[k + 1].shot.in_s
+            continue
+        kind = _transition_of(user) if user else A.transition
+        if kind == "dissolve" and k + 1 < n:
+            slots[k].mix_out = slots[k + 1].mix_in = A.fade_s
+        elif kind in ("fade", "dissolve"):               # a dissolve into nothing (the last panel) fades out
+            slots[k].fade_out = A.fade_s
+            if k + 1 < n:
+                slots[k + 1].fade_in = A.fade_s
+    total = sum(durs)
+    f = A.duration_s / total if A.duration_s else 1.0
+    t = 0.0
+    for sl, d in zip(slots, durs):
+        d *= f
+        sl.start, sl.end = t, t + d
+        sl.fade_in, sl.fade_out = min(sl.fade_in * f, d / 2), min(sl.fade_out * f, d / 2)
+        sl.mix_in, sl.mix_out = min(sl.mix_in * f, d), min(sl.mix_out * f, d)
+        t += d
+    for a, b in zip(slots, slots[1:]):                   # a dissolve fits in both panels
+        a.mix_out = b.mix_in = min(a.mix_out, b.mix_in)
+    return slots, t
+
+
+def plan_card(L: LayoutSpec, O: StoryboardOutput, look: Look, aspect: float, notes_on: bool,
+              notes: list[list[tuple[str, str]]], side: int) -> tuple[Geo, Look, LayoutSpec, int, tuple[int, int]]:
+    """Geometry of an animatic card: one panel drawn like the page template, as big as fits in
+    side × side. Text sizes follow the video size, not the picture's (a big picture would get huge
+    notes); style sizes still win. Returns (geo, look, layout, notes lines, page size)."""
+    lk = replace(look)
+    label = max(14, round(side / 48))
+    text = max(14, round(side / 64))
+    lk.user_sizes = {"label_size": label, "number_size": round(label * 1.45), "notes_size": max(12, round(label * 0.92)),
+                     "text_size": text, "title_size": round(text * 1.3)} | look.user_sizes
+    pw = side
+    for _ in range(4):
+        Lc = L.model_copy(update={"columns": 1, "rows": 1, "page": "auto", "panel_width": max(64, pw)})
+        geo = _plan(Lc, O, lk, 1, aspect, notes_on, notes)
+        lines = max(geo.lines or [0])
+        W = geo.page_w
+        H = geo.margin * 2 + (geo.header_h + geo.gap if geo.header_h else 0) + geo.row_height(lines) + \
+            (geo.gap + geo.footer_h if geo.footer_h else 0)
+        if max(W, H) <= side * 1.02 or pw <= 64:
+            break
+        pw = int(pw * side / max(W, H) * 0.99)
+    geo.rows_per_page = 1
+    return geo, lk, Lc, lines, (W, H)
+
+
+def make_animatic(picks: list[Pick], views: list[View], card_pics: dict[int, bytes], card_notes: list, card,
+                  look: Look, O: StoryboardOutput, header: tuple[str, str], footers: list[str], strings: dict,
+                  name: str, out_dir: Path) -> tuple[VideoResult, list[_Slot]]:
+    """The panels one after another, each drawn as a card (the page template, one panel), with its
+    duration and its cut, fade or dissolve."""
+    A, fps = O.animation, O.animation.fps
+    slots, total = animatic_timeline(picks, A)
+    if total > MAX_VIDEO_S:
+        raise ToolError(f"output.animation.duration_s: the animatic would last {total:.0f} s (the sum of the panel "
+                        f"durations); the limit is {MAX_VIDEO_S} s. Give output.animation.duration_s to scale it "
+                        "down, or use fewer panels or a shorter panel_s")
+    F = max(1, round(total * fps))
+    _check_frames(F, fps, "output.animation")
+    geo, lk, Lc, lines, (cw, ch) = card
+    side = A.max_side or DEFAULT_SIDE[O.format]
+    s = min(1.0, side / max(cw, ch))
+    W, H = _even(round(cw * s)), _even(round(ch * s))
+    black = Image.new("RGB", (W, H), (0, 0, 0))
+    starts = [sl.start for sl in slots]
+    bar_h = max(4, round(min(W, H) * 0.008))
+
+    @lru_cache(maxsize=4)
+    def card_image(k: int) -> Image.Image:
+        v = views[k]
+        notes = (card_notes[k] or [("", " ")]) if geo.notes else []      # same box on every card, empty or not
+        cv = View(v.n, v.number, _unjpeg(card_pics[k]).convert("RGBA"), v.caption, notes, lines if geo.notes else 0)
+        page = render_pages([cv], geo, lk, Lc, header, footers[k], strings, with_labels=True)[0]
+        return _flatten(page).resize((W, H), Image.LANCZOS)
+
+    def frame(j: int) -> Image.Image:
+        t = (j + 0.5) / fps
+        k = max(0, min(len(slots) - 1, bisect.bisect_right(starts, t) - 1))
+        sl = slots[k]
+        im = card_image(k)
+        if sl.mix_out and k + 1 < len(slots) and t > sl.end - sl.mix_out / 2:
+            im = Image.blend(im, card_image(k + 1), min(1.0, (t - sl.end + sl.mix_out / 2) / sl.mix_out))
+        elif sl.mix_in and k > 0 and t < sl.start + sl.mix_in / 2:
+            im = Image.blend(card_image(k - 1), im, max(0.0, (t - sl.start + sl.mix_in / 2) / sl.mix_in))
+        elif sl.fade_out and t > sl.end - sl.fade_out:
+            im = Image.blend(im, black, min(1.0, (t - sl.end + sl.fade_out) / sl.fade_out))
+        elif sl.fade_in and t < sl.start + sl.fade_in:
+            im = Image.blend(black, im, max(0.0, (t - sl.start) / sl.fade_in))
+        else:
+            im = im.copy()
+        if A.progress:
+            d = ImageDraw.Draw(im)
+            d.rectangle((0, H - bar_h, W - 1, H - 1), fill=(0, 0, 0))
+            d.rectangle((0, H - bar_h, max(0, round(W * t / total) - 1), H - 1), fill=_rgb(look.accent))
+            if len(slots) <= 100:
+                for x in starts[1:]:
+                    xx = round(W * x / total)
+                    d.rectangle((xx - 1, H - bar_h, xx, H - 1), fill=_rgb(look.text))
+        return im
+
+    mids = [min(F - 1, int((sl.start + sl.end) / 2 * fps)) for sl in slots]
+    path = out_dir / f"{name}.{O.format}"
+    codec = _write_video(path, O.format, (W, H), fps, O.quality, F, frame,
+                         sorted(set(mids[:: max(1, len(mids) // 24)]) | {0, F - 1}))
+    pick = sorted({round(i * (len(mids) - 1) / 11) for i in range(12)}) if len(mids) > 12 else range(len(mids))
+    js = [mids[k] for k in pick]
+    title = f"{strings['samples']} · {path.name} · {W}×{H} · {fps} fps · {F / fps:.1f} s"
+    spath = path.with_name(path.stem + "_samples.png")
+    _samples_image([(f"{j / fps:.1f} s · {strings['panel']} {views[k].number}", frame(j)) for k, j in zip(pick, js)],
+                   look, title, 4).save(spath, optimize=True)
+    video = VideoResult(kind="animatic", path=str(path), format=O.format, codec=codec, size=[W, H], fps=fps,
+                        frames=F, duration_s=round(F / fps, 3), bytes=path.stat().st_size,
+                        loop=O.format in ("gif", "webp"), samples=str(spath),
+                        sample_times_s=[round(j / fps, 2) for j in js])
+    return video, slots
+
+
+def dominant_colors(im: Image.Image, n: int) -> list[ColorShare]:
+    """The n most common colours of a picture (median cut on a small copy), most common first."""
+    small = im.convert("RGB")
+    small.thumbnail((160, 160))
+    q = small.quantize(colors=n, method=Image.Quantize.MEDIANCUT, kmeans=2, dither=Image.Dither.NONE)
+    pal = q.getpalette() or []
+    counts = sorted((c for c in (q.getcolors() or []) if c[0]), reverse=True)
+    total = sum(c for c, _ in counts) or 1
+    return [ColorShare(hex="#%02x%02x%02x" % tuple(pal[3 * i:3 * i + 3]), pct=round(100 * c / total, 1))
+            for c, i in counts]
+
+
+def color_script_image(colors: list[list[ColorShare]], numbers: list[str], pictures: list[Image.Image],
+                       look: Look, title: str, subtitle: str) -> Image.Image:
+    """The colour script: one column per panel, in order, with its picture on top (when wide enough),
+    its dominant colours stacked by share, and its number."""
+    n = len(colors)
+    cw = max(16, min(160, 2400 // max(1, n)))
+    gap = 6 if cw >= 60 else 3 if cw >= 30 else 1
+    pad, fs = 28, 20
+    th = round(cw * pictures[0].height / max(1, pictures[0].width)) if cw >= 40 and pictures else 0
+    band = max(160, round(cw * 1.5))
+    nfs = max(10, min(22, cw // 4))
+    num_h = round(nfs * 1.8) if cw >= 24 else 0
+    W = 2 * pad + n * cw + (n - 1) * gap
+    head = round(fs * 1.3) + round(fs * 0.85 * 1.6)
+    H = pad + head + pad // 2 + (th + gap if th else 0) + band + num_h + pad
+    page = Image.new("RGB", (max(W, 480), H), _rgb(look.bg))
+    d = ImageDraw.Draw(page)
+    d.text((pad, pad), _ellipsize(d, title, look.font(fs * 1.15, bold=True), page.width - 2 * pad),
+           font=look.font(fs * 1.15, bold=True), fill=_rgb(look.text))
+    d.text((pad, pad + round(fs * 1.45)), _ellipsize(d, subtitle, look.font(fs * 0.85), page.width - 2 * pad),
+           font=look.font(fs * 0.85), fill=_rgb(look.text2))
+    y0 = pad + head + pad // 2
+    for k, (cols, num) in enumerate(zip(colors, numbers)):
+        x = pad + k * (cw + gap)
+        y = y0
+        if th:
+            page.paste(_flatten(pictures[k]).resize((cw, th), Image.LANCZOS), (x, y))
+            y += th + gap
+        total = sum(c.pct for c in cols) or 1.0
+        yy = y
+        for j, c in enumerate(cols):
+            h = (y + band - yy) if j == len(cols) - 1 else round(band * c.pct / total)
+            d.rectangle((x, yy, x + cw - 1, yy + max(1, h) - 1), fill=ImageColor.getrgb(c.hex))
+            yy += h
+        if num_h:
+            d.text((x + cw / 2, y + band + num_h / 2), num, font=look.font(nfs, bold=True),
+                   fill=_rgb(look.text2), anchor="mm")
+    return page
 
 
 # ============================================================================ tools
@@ -2013,13 +2964,22 @@ def _anchor(i: int, src) -> str | None:
     return None
 
 
+def _transition_word(kind: str, color: str | None, strings) -> str:
+    w = strings["trans"][kind]
+    return w.get(color, w[None]) if isinstance(w, dict) else w
+
+
 def _label_text(fields, template, src, number: str, p: Pick, pct: float, strings, sharp_pct) -> str:
     anchor = _anchor(p.key, src)
     anchor_txt = strings[anchor] if anchor else ""
+    s = p.shot
+    shot_vals = {"shot_in": _hms(s.t_in), "shot_out": _hms(s.t_out), "duration": f"{_tenths(s.t_out - s.t_in):.1f}s",
+                 "transition": _transition_word(s.trans_out, s.color_out, strings)} if s else \
+        {"shot_in": "", "shot_out": "", "duration": "", "transition": ""}
     if template is not None:
         vals = {"number": number, "n": number, "pct": f"{pct:.0f}", "pct1": f"{pct:.1f}",
                 "sharpness": f"{p.sharpness:.0f}" if p.sharpness is not None else "",
-                "sharpness_pct": sharp_pct}
+                "sharpness_pct": sharp_pct} | shot_vals
         if src.kind == "video":
             vals |= {"frame": p.key, "frames_total": src.frames, "time": f"{_tenths(p.t):.1f}", "timecode": _hms(p.t),
                      "anchor": anchor_txt}
@@ -2030,7 +2990,10 @@ def _label_text(fields, template, src, number: str, p: Pick, pct: float, strings
         return template.format(**vals).strip()
     parts = []
     for f in fields:
-        if f == "number":
+        if f in SHOT_LABELS:
+            if shot_vals[f]:
+                parts.append(shot_vals[f])
+        elif f == "number":
             parts.append(number)
         elif f in ("frame", "image"):
             parts.append(f"#{p.key}")
@@ -2054,7 +3017,7 @@ def _label_text(fields, template, src, number: str, p: Pick, pct: float, strings
     return " · ".join(parts)
 
 
-def check_layout(kind: str, L: LayoutSpec, out: StoryboardOutput | None) -> list[str]:
+def check_layout(kind: str, L: LayoutSpec, out: StoryboardOutput | None, shots: bool = False) -> list[str]:
     p = []
     for k, f in enumerate(L.label.fields or []):
         if kind == "images" and f in VIDEO_LABELS:
@@ -2063,6 +3026,8 @@ def check_layout(kind: str, L: LayoutSpec, out: StoryboardOutput | None) -> list
         if kind == "video" and f in IMAGE_LABELS:
             p.append(f'layout.label.fields[{k}]: "{f}" is only for image input; with a video use number, frame, '
                      "time, timecode, pct, sharpness, sharpness_pct or anchor")
+        if f in SHOT_LABELS and not shots:
+            p.append(f'layout.label.fields[{k}]: "{f}" needs select.mode "shots" (one panel per shot of a video)')
     if L.label.template is not None:
         keys: set[str] = set()
         try:
@@ -2075,6 +3040,9 @@ def check_layout(kind: str, L: LayoutSpec, out: StoryboardOutput | None) -> list
                      + " ".join("{" + x + "}" for x in sorted(TEMPLATE_KEYS)))
         for k in sorted(keys & (VIDEO_KEYS if kind == "images" else IMAGE_KEYS)):
             p.append(f"layout.label.template: {{{k}}} is only for {'video' if kind == 'images' else 'image'} input")
+        if not shots:
+            for k in sorted(keys & SHOT_LABELS):
+                p.append(f'layout.label.template: {{{k}}} needs select.mode "shots"')
     try:
         L.numbering.format.format(n=1)
         if "{n" not in L.numbering.format:
@@ -2089,7 +3057,8 @@ CSV_ES = {"n": "n", "number": "viñeta", "page": "página", "frame": "fotograma"
           "timecode": "tiempo", "pct": "%", "image": "imagen", "name": "nombre", "shot": "plano",
           "camera": "cámara", "action": "acción", "dialogue": "diálogo", "sound": "sonido",
           "transition": "transición", "duration_s": "duración (s)", "sharpness": "nitidez", "file": "archivo",
-          "size": "tamaño", "source": "original"}
+          "size": "tamaño", "source": "original", "shot_in_s": "entrada (s)", "shot_out_s": "salida (s)",
+          "transition_in": "transición de entrada", "transition_out": "transición de salida", "colors": "colores"}
 
 
 def _flatten(im: Image.Image) -> Image.Image:
@@ -2108,13 +3077,47 @@ def _preview(page: Image.Image, longest: int = 1200) -> mt.ImageContent:
 
 def _selection_result(c: Chosen) -> SelectionResult:
     return SelectionResult(mode=c.mode, range_s=c.range_s, range_pct=c.range_pct, measured=c.measured,
-                           threshold=c.threshold, sharpness_stats=c.stats)
+                           threshold=c.threshold, sharpness_stats=c.stats, shots=c.shots)
+
+
+def _shots_on(kind: str, sel: SelectSpec, panels: list[Panel]) -> bool:
+    """True when the panels will be the shots of a video (mode "shots" and no exact positions)."""
+    return kind == "video" and sel.mode == "shots" and not any(_given(sel, f) for f in EXACT_FIELDS) and \
+        not any(getattr(p, k) is not None for p in panels for k in PANEL_POS)
+
+
+def _shot_fields(r: PanelResult, p: Pick):
+    s = p.shot
+    if s is None:
+        return
+    r.shot_in_s, r.shot_out_s, r.duration_s = round(s.t_in, 3), round(s.t_out, 3), round(s.t_out - s.t_in, 3)
+    r.shot_frames, r.transition_in, r.transition_out = [s.first, s.last], s.trans_in, s.trans_out
+    r.transition_in_s = round(s.in_s, 2) if s.in_s else None
+    r.transition_out_s = round(s.out_s, 2) if s.out_s else None
+
+
+def check_output(kind: str, O: StoryboardOutput) -> list[str]:
+    p = []
+    A = O.animation
+    if O.format not in ANIMATED:
+        if "animation" in O.model_fields_set:
+            p.append('output.animation: only used with an animated output.format: "mp4", "webm", "gif" or "webp"')
+        return p
+    if A.kind == "mosaic" and kind != "video":
+        p.append('output.animation.kind: "mosaic" needs a video (each panel plays its part of it); with images '
+                 'use "animatic", a timed slideshow')
+    if A.max_side and A.max_side > MAX_SIDE[O.format]:
+        p.append(f"output.animation.max_side: {A.max_side} px is too big for {O.format} (at most "
+                 f"{MAX_SIDE[O.format]} px); use mp4 or webm for bigger videos")
+    return p
 
 
 def tool_make_storyboard(args: StoryboardArgs):
     src = make_source(args.input)
     L, S, O = args.layout, args.style, args.output
-    problems = check_selection(src.kind, args.select, args.panels) + check_layout(src.kind, L, O)
+    shots_on = _shots_on(src.kind, args.select, args.panels)
+    problems = check_selection(src.kind, args.select, args.panels) + check_layout(src.kind, L, O, shots_on) + \
+        check_output(src.kind, O)
     if problems:
         raise ToolError(_problems_text("make_storyboard", problems))
     chosen = choose(src, args.select, args.panels)
@@ -2123,13 +3126,17 @@ def tool_make_storyboard(args: StoryboardArgs):
     look = resolve_look(S, L.template)
     t = TEMPLATES[L.template]
     aspect = ASPECT_RATIOS[L.aspect] if L.aspect != "source" else src.aspect
-    has_notes = any(p.note and any(getattr(p.note, f) not in (None, "") for f in
-                                   ("shot", "camera", "action", "dialogue", "sound", "transition", "duration_s"))
-                    for p in picks)
+    note_fields = ("shot", "camera", "action", "dialogue", "sound", "transition", "duration_s")
+    has_notes = any(p.note and any(getattr(p.note, f) not in (None, "") for f in note_fields) for p in picks)
     notes_on = L.notes.show if L.notes.show is not None else (has_notes if L.template == "strip" else t["notes"])
+    animated = O.format in ANIMATED
+    kind = (O.animation.kind if O.animation.kind != "auto" else "mosaic" if src.kind == "video" else "animatic") \
+        if animated else None
+    if "color_count" in O.model_fields_set and not O.color_script:
+        chosen.warnings.append("output.color_count: not used without output.color_script")
 
-    def note_items(p: Pick) -> list[tuple[str, str]]:
-        if not (notes_on and p.note):
+    def note_items(p: Pick, on: bool) -> list[tuple[str, str]]:
+        if not (on and p.note):
             return []
         out = []
         for f in L.notes.fields:
@@ -2138,7 +3145,7 @@ def tool_make_storyboard(args: StoryboardArgs):
                 out.append((strings["notes"][f], f"{val:g} s" if f == "duration_s" else str(val)))
         return out
 
-    notes_texts = [note_items(p) for p in picks]
+    notes_texts = [note_items(p, notes_on) for p in picks]
     geo = _plan(L, O, look, len(picks), aspect, notes_on, notes_texts)
     if geo.page_h:
         avail_h = geo.page_h - 2 * geo.margin - (geo.header_h + geo.gap if geo.header_h else 0) - \
@@ -2154,6 +3161,11 @@ def tool_make_storyboard(args: StoryboardArgs):
     pages_n = math.ceil(len(picks) / per_page)
     if pages_n > MAX_PAGES:
         raise ToolError(f"{pages_n} pages; the limit is {MAX_PAGES}. Use more layout.rows or columns, or fewer panels")
+    card = card_notes = None
+    if kind == "animatic":                   # the cards are planned first: pictures are made once, at their size
+        card_on = L.notes.show if L.notes.show is not None else has_notes
+        card_notes = [note_items(p, card_on) for p in picks]
+        card = plan_card(L, O, look, aspect, card_on, card_notes, O.animation.max_side or DEFAULT_SIDE[O.format])
 
     out_dir = _out_dir(O.dir, _default_dir(src))
     name = O.name or f"{src.name}_{L.template}"
@@ -2164,6 +3176,8 @@ def tool_make_storyboard(args: StoryboardArgs):
     order = {id(p): k for k, p in enumerate(picks)}
     files: dict[int, str] = {}
     pictures: dict[int, Image.Image] = {}
+    colors: dict[int, list[ColorShare]] = {}
+    card_pics: dict[int, bytes] = {}
 
     def sink(p: Pick, im: Image.Image):
         k = order[id(p)]
@@ -2178,10 +3192,15 @@ def tool_make_storyboard(args: StoryboardArgs):
                 shutil.copy2(src.paths[p.key], dest)
             files[k] = (str(dest), [im.width, im.height])
         pictures[k] = _fit_picture(im, geo.panel_w, geo.panel_h, L.fit, look.bg, look.sharpen)
+        if O.color_script:
+            colors[k] = dominant_colors(im, O.color_count)
+        if card:
+            card_pics[k] = _jpeg(_fit_picture(im, card[0].panel_w, card[0].panel_h, L.fit, look.bg, look.sharpen))
 
     src.fetch(picks, sink)
     top = max((p.sharpness or 0) for p in picks) or 1.0
-    fields = L.label.fields or (["number", "time", "frame", "anchor"] if src.kind == "video" else ["number", "name"])
+    fields = L.label.fields or (["number", "shot_in", "duration", "transition"] if shots_on else
+                                ["number", "time", "frame", "anchor"] if src.kind == "video" else ["number", "name"])
     if t["caption"] == "line":
         fields = [f for f in fields if f != "number"]
     views, results = [], []
@@ -2197,11 +3216,12 @@ def tool_make_storyboard(args: StoryboardArgs):
         r = PanelResult(n=k + 1, number=number, page=k // per_page + 1, pct=pct,
                         sharpness=round(p.sharpness, 1) if p.sharpness is not None else None, sharpness_pct=sp,
                         file=files[k][0] if k in files else None, size=files[k][1] if k in files else None,
-                        notes=notes or None)
+                        notes=notes or None, colors=colors.get(k))
         if src.kind == "video":
             r.frame, r.time_s, r.timecode, r.anchor = p.key, round(p.t, 3), _hms(p.t), _anchor(p.key, src)
         else:
             r.image, r.name, r.source = p.key, src.paths[p.key].name, str(src.paths[p.key])
+        _shot_fields(r, p)
         results.append(r)
 
     if src.kind == "video":
@@ -2228,7 +3248,12 @@ def tool_make_storyboard(args: StoryboardArgs):
         geo.header_h = 0
     word = strings["frames"] if src.kind == "video" else strings["images"]
     modes = strings.get("mode_images", strings["mode"]) if src.kind == "images" else strings["mode"]
-    foot = [f"{len(picks)} {word} ({modes[chosen.mode]})"]
+    if chosen.shots:
+        sh = chosen.shots
+        foot = [f"{sh.found} {strings['shots']} ({modes['shots']}) · {strings['cuts']}: {sh.cuts}, "
+                f"{strings['fades']}: {sh.fades}, {strings['dissolves']}: {sh.dissolves}"]
+    else:
+        foot = [f"{len(picks)} {word} ({modes[chosen.mode]})"]
     if chosen.range_s:
         foot.append(f"{strings['range']} {_hms(chosen.range_s[0])}–{_hms(chosen.range_s[1])} "
                     f"({chosen.range_pct[0]:.0f}–{chosen.range_pct[1]:.0f} %)")
@@ -2245,9 +3270,10 @@ def tool_make_storyboard(args: StoryboardArgs):
     if chosen.threshold > 0:
         foot.append(f"{strings['threshold']} {chosen.threshold:.0f}")
     footer = L.footer_text if L.footer_text is not None else " · ".join(foot)
+    still = "png" if animated else O.format          # animated output: the pages are PNG
 
     def write(imgs: list[Image.Image], base: str) -> tuple[str | None, list[str]]:
-        if O.format == "pdf":
+        if still == "pdf":
             path = out_dir / f"{base}.pdf"
             flat = [_flatten(p) for p in imgs]
             flat[0].save(path, "PDF", save_all=True, append_images=flat[1:], resolution=float(O.dpi),
@@ -2255,8 +3281,8 @@ def tool_make_storyboard(args: StoryboardArgs):
             return str(path), []
         paths = []
         for k, im in enumerate(imgs, 1):
-            path = out_dir / f"{base}{f'_p{k}' if len(imgs) > 1 else ''}.{O.format}"
-            if O.format == "png":
+            path = out_dir / f"{base}{f'_p{k}' if len(imgs) > 1 else ''}.{still}"
+            if still == "png":
                 (im if look.bg[3] < 255 else im.convert("RGB")).save(path, optimize=True, dpi=(O.dpi, O.dpi))
             else:
                 _flatten(im).save(path, quality=O.quality, dpi=(O.dpi, O.dpi))
@@ -2277,6 +3303,34 @@ def tool_make_storyboard(args: StoryboardArgs):
         bare = render_pages(views, geo, look, L, (title, subtitle), footer, strings, with_labels=False)
         p2, paths2 = write(bare, f"{name}_nolabels")
         nolabels = [p2] if p2 else paths2
+
+    videos = None
+    if kind == "mosaic":
+        parts = render_pages(views, geo, look, L, (title, subtitle), footer, strings, with_labels=True, parts=True)
+        videos, clips = make_mosaic(src, picks, chosen.range_s[1], parts, geo, look, L, O, name, out_dir, strings)
+        for k, (clip, speed) in clips.items():
+            results[k].clip_s, results[k].speed = clip, speed
+    elif kind == "animatic":
+        footers = []
+        for k, p in enumerate(picks):
+            where = f" · {_hms(p.t)}" if src.kind == "video" else f" · {src.paths[p.key].name}"
+            num = "" if views[k].number == str(k + 1) else f" ({views[k].number})"
+            footers.append(L.footer_text if L.footer_text is not None else
+                           f"{strings['panel']} {k + 1} {strings['of']} {len(picks)}{num}{where}")
+        video, slots = make_animatic(picks, views, card_pics, card_notes, card, look, O, (title, subtitle), footers,
+                                     strings, name, out_dir)
+        videos = [video]
+        for r, sl in zip(results, slots):
+            r.video_s = [round(sl.start, 3), round(sl.end, 3)]
+
+    color_path = None
+    if O.color_script:
+        sub = f"{len(picks)} {strings['panels']} · {O.color_count} {strings['colors']}"
+        img = color_script_image([colors[k] for k in range(len(picks))], [v.number for v in views],
+                                 [v.picture for v in views], look, f"{strings['color_script']} · {title}", sub)
+        color_path = out_dir / f"{name}_colors.png"
+        img.save(color_path, optimize=True)
+
     shot = None
     if O.shot_list:
         shot = {}
@@ -2289,9 +3343,17 @@ def tool_make_storyboard(args: StoryboardArgs):
         if "csv" in O.shot_list:
             pc = out_dir / f"{name}_shots.csv"
             note_cols = ("shot", "camera", "action", "dialogue", "sound", "transition", "duration_s")
-            cols = ["n", "number", "page", "frame", "time_s", "timecode", "pct", "image", "name", *note_cols,
-                    "sharpness", "file", "size", "source"]
+            cols = ["n", "number", "page", "frame", "time_s", "timecode", "pct", "shot_in_s", "shot_out_s",
+                    "transition_in", "transition_out", "image", "name", *note_cols, "sharpness", "colors", "file",
+                    "size", "source"]
             excel = O.csv_style == "excel_es"
+
+            def value(r: dict, c: str):
+                if c == "duration_s":                   # the planned duration, or else the shot's length
+                    return (r.get("notes") or {}).get(c, r.get(c))
+                if c == "colors":
+                    return ", ".join(f"{x['hex']} {x['pct']:g}%" for x in r.get("colors") or [])
+                return (r.get("notes") or {}).get(c) if c in note_cols else r.get(c)
 
             def cell(c, v):
                 if v in (None, ""):
@@ -2304,8 +3366,7 @@ def tool_make_storyboard(args: StoryboardArgs):
                     return f"{v:g}".replace(".", ",")
                 return v
 
-            table = [[cell(c, (r.get("notes") or {}).get(c) if c in note_cols else r.get(c)) for c in cols]
-                     for r in rows]
+            table = [[cell(c, value(r, c)) for c in cols] for r in rows]
             if excel:                               # for people: Spanish headers, no always-empty columns
                 keep = [j for j in range(len(cols)) if any(row[j] != "" for row in table)]
                 cols = [CSV_ES.get(cols[j], cols[j]) for j in keep]
@@ -2317,13 +3378,19 @@ def tool_make_storyboard(args: StoryboardArgs):
             shot["csv"] = str(pc)
     result = StoryboardResult(
         pages=page_results, pdf=pdf, pages_without_labels=nolabels, shot_list=shot,
-        frames_dir=str(frames_dir) if frames_dir else None, panels=results, dropped=chosen.dropped,
+        frames_dir=str(frames_dir) if frames_dir else None, videos=videos,
+        color_script=str(color_path) if color_path else None, panels=results, dropped=chosen.dropped,
         selection=_selection_result(chosen),
         layout={"template": L.template, "columns": geo.cols, "rows_per_page": geo.rows_per_page,
                 "picture_size": [geo.panel_w, geo.panel_h], "page": L.page, "page_size": list(pages[0].size),
                 "theme": S.theme},
         input=src.result(with_items=False), warnings=chosen.warnings)
-    return result, ([_preview(pages[0])] if O.preview else [])
+    extra = []
+    if O.preview:
+        extra.append(_preview(pages[0]))
+        if videos:
+            extra.append(_preview(Image.open(videos[0].samples)))
+    return result, extra
 
 
 def _save_still(im: Image.Image, dest: Path, fmt: str, quality: int):
@@ -2376,6 +3443,7 @@ def tool_extract_frames(args: FramesArgs):
             r = PanelResult(n=k + 1, number=str(k + 1), image=p.key, name=orig.name, source=str(orig),
                             pct=chosen.pct_of(p), file=str(dest))
         r.sharpness, r.size = round(p.sharpness, 1), [im.width, im.height]
+        _shot_fields(r, p)
         results[k] = r
 
     src.fetch(chosen.picks, sink)
@@ -2413,6 +3481,28 @@ EXAMPLES: dict[str, dict[str, Any]] = {
             "style": {"theme": "light", "accent": "#c2410c", "font": "Helvetica"},
             "output": {"dir": "/Users/ana/Desktop/storyboard", "name": "escena5", "format": "pdf", "dpi": 150,
                        "shot_list": ["json", "csv"]},
+        },
+        "shots": {
+            "input": {"video": "/Users/ana/Movies/trailer.mp4"},
+            "select": {"mode": "shots", "shot_threshold": 20, "min_shot_s": 0.4},
+            "layout": {"template": "storyboard", "label": {"fields": ["shot_in", "duration", "transition"]}},
+            "output": {"dir": "/Users/ana/Desktop/planos", "shot_list": ["json", "csv"], "color_script": True},
+        },
+        "mosaic": {
+            "input": {"video": "/Users/ana/Movies/clip.mp4"},
+            "select": {"count": 8},
+            "output": {"dir": "/Users/ana/Desktop/mosaico", "format": "gif",
+                       "animation": {"kind": "mosaic", "fps": 12, "duration_s": 6}},
+        },
+        "animatic": {
+            "input": {"video": "/Users/ana/Movies/clip.mp4"},
+            "select": {"at_s": [1.5, 6, 12.5]},
+            "panels": [{"shot": "PG", "action": "Amanece.", "duration_s": 3, "transition": "encadenado"},
+                       {"shot": "PM", "dialogue": "ANA: Llego tarde.", "duration_s": 2},
+                       {"shot": "PP", "action": "Mira el reloj.", "transition": "fundido a negro"}],
+            "layout": {"template": "storyboard"},
+            "output": {"dir": "/Users/ana/Desktop/animatica", "format": "mp4",
+                       "animation": {"kind": "animatic", "panel_s": 2, "fade_s": 0.5}},
         },
     },
     "extract_frames": {
@@ -2459,8 +3549,16 @@ TOOLS: dict[str, ToolSpec] = {
         'The 4 sharpest photos, no repeats: {"input": {"folder": "/abs/photos"}, "select": {"mode": "best", '
         '"count": 4}}. Printable storyboard: {"layout": {"template": "storyboard", "page": "A4"}, '
         '"style": {"theme": "light"}, "output": {"format": "pdf", "shot_list": ["csv"]}} (add "csv_style": '
-        '"excel_es" for Excel in Spanish). If fewer panels than asked come out, warnings says why and what to '
-        'change. get_schema {"tool": "make_storyboard"} has a full example.'), False),
+        '"excel_es" for Excel in Spanish).\n'
+        'One panel per shot: {"select": {"mode": "shots"}}: each panel gets shot_in_s, shot_out_s, duration_s '
+        'and transition_in / transition_out (cut, fade_in / fade_out, dissolve).\n'
+        'Animated: "output": {"format": "gif"} (or "mp4", "webm", "webp"). With a video, the page itself with '
+        'every panel playing its part of the video (mosaic); with images, a timed slideshow; "animation": '
+        '{"kind": "animatic"} plays the panels one after another with their duration_s and transition. You '
+        "cannot watch it: the answer has the still page and videos[].samples, an image of sample frames.\n"
+        'Colour script: "output": {"color_script": true} (dominant colours per panel).\n'
+        'If fewer panels than asked come out, warnings says why and what to change. get_schema {"tool": '
+        '"make_storyboard"} has full examples.'), False),
     "extract_frames": ToolSpec(FramesArgs, FramesResult, tool_extract_frames, (
         "Save chosen video frames at full size (JPEG or PNG), or copies of chosen images, to look at details "
         "the panels are too small to show. Same input and select as make_storyboard, e.g. "
@@ -2468,11 +3566,13 @@ TOOLS: dict[str, ToolSpec] = {
         '{"select": {"at_s": [12.5], "snap_s": 0.5}} (the sharpest frame within ± 0.5 s). Frames are saved '
         "upright (rotation applied), at displayed_size, as f<frame, 5 digits>.jpg (frame 42 -> f00042.jpg). "
         'Images are copied byte for byte as 001_<name>, 002_<name>... (output.names "original" keeps the '
-        "names). Each entry of files gives its path (file) and size in px."), False),
+        'names). {"select": {"mode": "shots"}} saves the sharpest frame of each shot, with the shot\'s start, '
+        "end and transitions. Each entry of files gives its path (file) and size in px."), False),
     "get_schema": ToolSpec(SchemaArgs, None, lambda a: (schema_document(a.tool), []), (
-        "The JSON Schema of the tools' arguments and answers, with a minimal and a full example of each, "
-        "and the conventions (paths, positions, defaults). The same information the tools' input schemas "
-        'give, in one document. {"tool": "make_storyboard"} returns only that tool.'), True),
+        "The JSON Schema of the tools' arguments and answers, with examples of each (minimal and full; for "
+        "make_storyboard also shots, mosaic and animatic), and the conventions (paths, positions, defaults, "
+        "limits). The same information the tools' input schemas give, in one document. "
+        '{"tool": "make_storyboard"} returns only that tool.'), True),
 }
 
 
@@ -2505,6 +3605,9 @@ CONVENTIONS = [
     "Defaults: video -> the sharpest frame of each of 12 stretches; images -> all; layout grid with 4 "
     "columns; theme dark (black page); output png in a temporary folder named in the answer.",
     "Answers are JSON (also as structured content). make_storyboard also returns a small image of page 1.",
+    "Animated output (output.format mp4, webm, gif, webp) always comes with the still pages as PNG, an image of "
+    f"sample frames (videos[].samples) and the JSON. Limits: {MAX_VIDEO_S} s, {MAX_VIDEO_FRAMES} frames, 30 fps, "
+    "3840 px (gif and webp 1280 px).",
 ]
 
 

@@ -9,13 +9,14 @@
 import csv
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
 import av
 import jsonschema
 import pytest
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageStat
 
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("storyboard_server", ROOT / "server.py")
@@ -61,6 +62,49 @@ def photos(tmp_path_factory) -> Path:
     rot.save(d / "img10_exif.jpg", exif=exif)
     (d / "notes.txt").write_text("not an image")
     return d
+
+
+SHOT_COLORS = [(30, 60, 200), (220, 120, 30), (40, 160, 60), (150, 50, 160)]
+
+
+def _shot(k: int, i: int) -> Image.Image:
+    """Scene k of the shots video: a colour with stripes and a white box moving."""
+    im = Image.new("RGB", (160, 90), SHOT_COLORS[k])
+    d = ImageDraw.Draw(im)
+    for x in range(0, 160, 12):
+        d.line((x, 0, x, 90), fill=tuple(min(255, c + 70) for c in SHOT_COLORS[k]), width=3)
+    bx = 10 + (i * 4) % 110
+    d.rectangle((bx, 30, bx + 30, 60), fill=(255, 255, 255))
+    return im
+
+
+@pytest.fixture(scope="session")
+def shots_video(tmp_path_factory) -> Path:
+    """10.5 s, 10 fps, 160×90, four shots: A (0-1.9 s) | cut at 2.0 s | B | dissolve 4.0-4.9 s | C | fade to
+    black 7.0-7.4 s, black, fade in 7.8-8.2 s | D, with a one-frame flash at 9.5 s that is not a cut."""
+    black = Image.new("RGB", (160, 90))
+    frames = [_shot(0, i) for i in range(20)] + [_shot(1, i) for i in range(20)]
+    frames += [Image.blend(_shot(1, 20 + j), _shot(2, j), (j + 0.5) / 10) for j in range(10)]
+    frames += [_shot(2, 10 + i) for i in range(20)]
+    frames += [Image.blend(_shot(2, 30 + j), black, (j + 1) / 5) for j in range(5)] + [black] * 3
+    frames += [Image.blend(black, _shot(3, j), (j + 1) / 5) for j in range(5)]
+    frames += [_shot(3, 5 + i) for i in range(22)]
+    frames[95] = Image.blend(frames[95], Image.new("RGB", (160, 90), "white"), 0.8)
+    path = tmp_path_factory.mktemp("media") / "shots.mp4"
+    with av.open(str(path), "w") as c:
+        st = c.add_stream("mpeg4", rate=10)
+        st.width, st.height, st.pix_fmt = 160, 90, "yuv420p"
+        for im in frames:
+            for pkt in st.encode(av.VideoFrame.from_image(im)):
+                c.mux(pkt)
+        for pkt in st.encode():
+            c.mux(pkt)
+    return path
+
+
+def decoded(path) -> list:
+    with av.open(str(path)) as c:
+        return [f.to_image() for f in c.decode(video=0)]
 
 
 def run(name, args):
@@ -285,8 +329,8 @@ def test_errors_are_clear(video, photos):
     assert "input.images[1]: not an image this server can read: notes.txt" in e
     e = err("make_storyboard", {"input": {"folder": str(photos)}, "select": {"at_s": [1]}})
     assert "select.at_s: only for video input" in e
-    e = err("make_storyboard", {"input": {"folder": str(photos)}, "output": {"format": "MP4"}})
-    assert 'output.format: "mp4" is planned for animated output and not available yet' in e
+    e = err("make_storyboard", {"input": {"folder": str(photos)}, "output": {"format": "tiff"}})
+    assert "output.format: Input should be 'png', 'jpg', 'pdf', 'mp4', 'webm', 'gif' or 'webp'" in e
     e = err("make_storyboard", {"input": {"video": str(video)}, "layout": {"numbering": "3.{n}"}})
     assert 'layout.numbering: expected an object like {"format": "5.{n}"}' in e
     e = err("make_storyboard", {"input": {"video": "no/such.mp4"}})
@@ -296,6 +340,154 @@ def test_errors_are_clear(video, photos):
     e = err("make_storyboard", {"input": {"video": str(video)}, "layout": {"label": {"template": "{nope}"}}})
     assert "unknown placeholder {nope}" in e
     assert "unknown tool" in err("storyboard", {})
+
+
+# ----------------------------------------------------------------------------- shots
+def test_shots_finds_cuts_dissolves_and_fades(shots_video, tmp_path):
+    d = run("make_storyboard", {"input": {"video": str(shots_video)}, "select": {"mode": "shots"},
+                                "output": {"dir": str(tmp_path), "name": "sh", "shot_list": ["json", "csv"],
+                                           "preview": False}})
+    jsonschema.validate(d, srv.output_schema("make_storyboard"))
+    p = d["panels"]
+    assert [x["transition_in"] for x in p] == ["start", "cut", "dissolve", "fade_in"]
+    assert [x["transition_out"] for x in p] == ["cut", "dissolve", "fade_out", "end"]   # the flash is no cut
+    assert (p[0]["shot_in_s"], p[0]["shot_out_s"], p[-1]["shot_out_s"]) == (0.0, 2.0, 10.5)
+    assert abs(p[1]["shot_out_s"] - 4.5) <= 0.2 and abs(p[2]["shot_out_s"] - 7.6) <= 0.2
+    for a, b in zip(p, p[1:]):                     # shots follow each other without gaps
+        assert a["shot_out_s"] == b["shot_in_s"] and a["shot_frames"][1] + 1 == b["shot_frames"][0]
+    for x in p:                                    # each panel shows a frame of its own shot
+        assert x["shot_frames"][0] <= x["frame"] <= x["shot_frames"][1]
+        assert x["duration_s"] == round(x["shot_out_s"] - x["shot_in_s"], 3)
+    assert 0.6 <= p[1]["transition_out_s"] <= 1.4 and 0.3 <= p[2]["transition_out_s"] <= 0.9
+    assert "transition_out_s" not in p[0]          # a cut has no length
+    assert d["selection"]["mode"] == "shots"
+    assert {k: d["selection"]["shots"][k] for k in ("found", "cuts", "fades", "dissolves")} == \
+        {"found": 4, "cuts": 1, "fades": 1, "dissolves": 1}
+    rows = list(csv.DictReader(open(d["shot_list"]["csv"], encoding="utf-8-sig")))
+    assert (rows[0]["shot_in_s"], rows[0]["shot_out_s"], rows[0]["duration_s"]) == ("0.0", "2.0", "2.0")
+    assert rows[1]["transition_out"] == "dissolve" and rows[3]["transition_in"] == "fade_in"
+    assert json.loads(Path(d["shot_list"]["json"]).read_text())["panels"][2]["transition_out"] == "fade_out"
+
+
+def test_shots_options_labels_and_extract(shots_video, tmp_path):
+    only_cuts = run("make_storyboard", {"input": {"video": str(shots_video)},
+                                        "select": {"mode": "shots", "fades": False},
+                                        "output": {"dir": str(tmp_path), "preview": False}})["panels"]
+    assert [x["transition_out"] for x in only_cuts] == ["cut", "cut", "end"]   # black gap: still a boundary
+    d = run("make_storyboard", {"input": {"video": str(shots_video)}, "select": {"mode": "shots", "end_s": 3},
+                                "layout": {"template": "storyboard", "label": {
+                                    "fields": ["shot_in", "shot_out", "duration", "transition"]}},
+                                "output": {"dir": str(tmp_path), "preview": False}})
+    assert len(d["panels"]) == 2 and d["panels"][-1]["transition_out"] == "end" and \
+        d["panels"][-1]["shot_out_s"] == 3.1
+    assert srv._transition_word("fade_out", "black", srv.STRINGS["es"]) == "fundido a negro"
+    assert srv._transition_word("dissolve", None, srv.STRINGS["en"]) == "dissolve"
+    f = run("extract_frames", {"input": {"video": str(shots_video)}, "select": {"mode": "shots"},
+                               "output": {"dir": str(tmp_path / "f")}})
+    assert len(f["files"]) == 4 and f["files"][2]["transition_out"] == "fade_out" and Path(f["files"][0]["file"]).is_file()
+    d = run("make_storyboard", {"input": {"video": str(shots_video)}, "select": {"count": 2, "min_shot_s": 1},
+                                "output": {"dir": str(tmp_path), "preview": False}})
+    assert any('only used with mode "shots"' in w for w in d["warnings"]) and "shot_in_s" not in d["panels"][0]
+
+
+# ----------------------------------------------------------------------------- animated output
+def test_mosaic_gif_and_mp4(video, tmp_path):
+    d, extra = srv.run_tool("make_storyboard", {"input": {"video": str(video)}, "select": {"count": 4},
+                                                "output": {"dir": str(tmp_path), "name": "m", "format": "GIF"}})
+    jsonschema.validate(d, srv.output_schema("make_storyboard"))
+    v = d["videos"][0]
+    assert (v["kind"], v["format"], v["codec"], v["loop"], v["fps"], v["page"]) == ("mosaic", "gif", "gif", True, 12, 1)
+    assert d["pages"][0]["path"].endswith("m.png") and Path(d["pages"][0]["path"]).is_file()   # the still page too
+    assert Path(v["samples"]).is_file() and [c.type for c in extra] == ["image", "image"]
+    frames = decoded(v["path"])
+    assert len(frames) == v["frames"] == 12 and list(frames[0].size) == v["size"]   # 1 s loop (stretches < 1 s)
+    with Image.open(v["path"]) as g:
+        assert g.info.get("loop") == 0                                              # loops forever
+    p = d["panels"]
+    assert p[0]["clip_s"][0] == 0.0 and p[-1]["clip_s"][1] == 2.9 and all(x["speed"] == 1.0 for x in p)
+    for x in p:
+        assert x["clip_s"][0] <= x["time_s"] <= x["clip_s"][1]
+    d = run("make_storyboard", {"input": {"video": str(video)}, "select": {"count": 2},
+                                "output": {"dir": str(tmp_path), "name": "m2", "format": "mp4", "preview": False,
+                                           "animation": {"duration_s": 0.5, "fps": 10, "max_side": 300}}})
+    v = d["videos"][0]
+    assert v["codec"] in ("h264", "mpeg4") and max(v["size"]) <= 300 and all(s % 2 == 0 for s in v["size"])
+    assert len(decoded(v["path"])) == v["frames"] == 5 and v["duration_s"] == 0.5 and not v["loop"]
+    assert all(x["speed"] == 2.9 for x in d["panels"])                       # 1.45 s stretches in a 0.5 s loop
+
+
+def test_animatic_durations_and_transitions(video, tmp_path):
+    panels = [{"action": "uno", "duration_s": 1, "transition": "Encadenado"},
+              {"dialogue": "dos", "duration_s": 0.5, "transition": "fundido a negro"},
+              {"action": "tres"}]
+    d, extra = srv.run_tool("make_storyboard", {
+        "input": {"video": str(video)}, "select": {"at_frames": [5, 15, 25]}, "panels": panels,
+        "layout": {"template": "storyboard"}, "style": {"theme": "light"},
+        "output": {"dir": str(tmp_path), "name": "a", "format": "webm",
+                   "animation": {"kind": "animatic", "panel_s": 1.5, "fps": 10, "fade_s": 0.2}}})
+    v = d["videos"][0]
+    assert v["kind"] == "animatic" and v["codec"] in ("vp9", "vp8") and v["frames"] == 30 and len(extra) == 2
+    assert [x["video_s"] for x in d["panels"]] == [[0.0, 1.0], [1.0, 1.5], [1.5, 3.0]]
+    frames = decoded(v["path"])
+    assert len(frames) == 30
+    light = [ImageStat.Stat(f.convert("L")).mean[0] for f in frames]
+    assert light[14] < 0.4 * light[5] and light[15] < 0.4 * light[25]        # fades to black and back at 1.5 s
+    a, b, mix = (frames[k].resize((32, 18)) for k in (6, 12, 10))             # 1.05 s: 3/4 into the dissolve
+    assert srv._difference(mix, Image.blend(a, b, 0.75)) < srv._difference(a, b) / 4
+    d = run("make_storyboard", {"input": {"video": str(video)}, "select": {"at_frames": [5, 15, 25]},
+                                "panels": panels, "output": {"dir": str(tmp_path), "name": "a2", "format": "mp4",
+                                                             "preview": False,
+                                                             "animation": {"kind": "animatic", "duration_s": 6}}})
+    assert [x["video_s"] for x in d["panels"]] == [[0.0, 1.714], [1.714, 2.571], [2.571, 6.0]]  # 1+0.5+2 s → 6 s
+
+
+def test_slideshow_from_images(photos, tmp_path):
+    d = run("make_storyboard", {"input": {"folder": str(photos)},
+                                "output": {"dir": str(tmp_path), "format": "webp", "preview": False,
+                                           "animation": {"panel_s": 0.5, "fps": 4, "transition": "dissolve"}}})
+    v = d["videos"][0]
+    assert (v["kind"], v["format"], v["loop"], v["frames"]) == ("animatic", "webp", True, 14)
+    assert [x["video_s"] for x in d["panels"][:2]] == [[0.0, 0.5], [0.5, 1.0]]
+    assert len(decoded(v["path"])) == 14 and Path(v["samples"]).is_file()
+
+
+def test_color_script(photos, tmp_path):
+    d = run("make_storyboard", {"input": {"folder": str(photos)},
+                                "output": {"dir": str(tmp_path), "color_script": True, "color_count": 3,
+                                           "shot_list": ["csv"], "preview": False}})
+    for p in d["panels"]:
+        pct = [c["pct"] for c in p["colors"]]
+        assert 1 <= len(pct) <= 3 and pct == sorted(pct, reverse=True) and abs(sum(pct) - 100) < 1
+        assert all(re.fullmatch(r"#[0-9a-f]{6}", c["hex"]) for c in p["colors"])
+    im = Image.open(d["color_script"])
+    assert d["color_script"].endswith("_colors.png") and im.width >= 7 * 16
+    rows = list(csv.DictReader(open(d["shot_list"]["csv"], encoding="utf-8-sig")))
+    assert rows[0]["colors"].startswith("#") and "%" in rows[0]["colors"]
+    red = srv.dominant_colors(Image.new("RGB", (40, 30), (255, 0, 0)), 4)
+    assert [(c.hex, c.pct) for c in red] == [("#ff0000", 100.0)]
+
+
+def test_animation_errors_and_limits(video, photos):
+    e = err("make_storyboard", {"input": {"folder": str(photos)},
+                                "output": {"format": "gif", "animation": {"kind": "mosaic"}}})
+    assert 'output.animation.kind: "mosaic" needs a video' in e and '"animatic"' in e
+    e = err("make_storyboard", {"input": {"video": str(video)}, "output": {"format": "gif",
+                                                                          "animation": {"max_side": 1920}}})
+    assert "output.animation.max_side: 1920 px is too big for gif (at most 1280 px)" in e
+    e = err("make_storyboard", {"input": {"video": str(video)}, "output": {"animation": {"fps": 24}}})
+    assert "output.animation: only used with an animated output.format" in e
+    e = err("make_storyboard", {"input": {"video": str(video)}, "output": {"format": "mp4", "animation": {"fps": 60}}})
+    assert "output.animation.fps: Input should be less than or equal to 30 (got 60)" in e
+    e = err("make_storyboard", {"input": {"video": str(video)}, "select": {"count": 6},
+                                "output": {"format": "mp4", "animation": {"kind": "animatic", "panel_s": 60}}})
+    assert "the animatic would last 360 s" in e and "limit is 300 s" in e
+    e = err("make_storyboard", {"input": {"video": str(video)},
+                                "output": {"format": "mp4", "animation": {"fps": 30, "duration_s": 150}}})
+    assert "4500 frames" in e and "limit is 3600" in e
+    e = err("make_storyboard", {"input": {"video": str(video)}, "layout": {"label": {"fields": ["duration"]}}})
+    assert 'layout.label.fields[0]: "duration" needs select.mode "shots"' in e
+    e = err("make_storyboard", {"input": {"folder": str(photos)}, "select": {"mode": "shots"}})
+    assert 'select.mode: "shots" finds the shots of a video' in e
 
 
 # ----------------------------------------------------------------------------- MCP protocol
@@ -313,6 +505,10 @@ def test_mcp_round_trip(video, tmp_path):
                                                             "output": {"dir": str(tmp_path)}})
             assert not ok.isError and ok.structuredContent["panels"][0]["n"] == 1
             assert [c.type for c in ok.content] == ["text", "image"]
+            gif = await client.call_tool("make_storyboard", {"input": {"video": str(video)}, "select": {"count": 2},
+                                                             "output": {"dir": str(tmp_path), "format": "gif"}})
+            assert not gif.isError and [c.type for c in gif.content] == ["text", "image", "image"]
+            assert gif.structuredContent["videos"][0]["path"].endswith(".gif")
             bad = await client.call_tool("make_storyboard", {"input": {}})
             assert bad.isError and "give exactly one of" in bad.content[0].text
             res = await client.read_resource("storyboard://schema")
