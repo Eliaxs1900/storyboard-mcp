@@ -181,9 +181,10 @@ TEMPLATES = {
 INSTRUCTIONS = f"""\
 Turns a video, or a list of images, into pages of panels you can look at (you cannot
 play a video), with one JSON entry per panel.
-Tools: media_info (what the input is) -> make_storyboard (pages as PNG, JPG or PDF;
-the answer includes a preview of page 1) -> extract_frames (chosen frames at full size).
-get_schema returns the JSON Schema of every tool with a minimal and a full example.
+Tools: media_info (what the input is) -> make_storyboard (pages as PNG, JPG or PDF, or
+an animated MP4, WebM, GIF or WebP; the answer includes a preview of page 1) ->
+extract_frames (chosen frames at full size). get_schema returns the JSON Schema of every
+tool with examples.
 All tools take the same JSON sections; only "input" is required:
   input   exactly one of {{"video": path}}, {{"images": [paths]}}, {{"folder": path}}
   select  which frames / images become panels (default: video, the sharpest frame of
@@ -372,16 +373,19 @@ class SelectSpec(Model):
     at_pct: list[Pct] | None = Field(None, description="Exact positions in % (0 = first frame or image, "
                                                        "100 = last).", examples=[[0, 50, 100]])
     at_s: list[NonNegFloat] | None = Field(None, description="Video, exact positions: times in seconds "
-                                                             "(0.0 = first frame).", examples=[[1.5, 12]])
+                                                             "(0.0 = first frame). Times given by a person often "
+                                                             "fall on a blurred frame: add snap_s (0.5).",
+                                           examples=[[1.5, 12]])
     at_frames: list[NonNegInt] | None = Field(None, description="Video, exact positions: frame numbers "
                                                                 "(0 = first frame).", examples=[[0, 240]])
     at_images: list[NonNegInt] | None = Field(None, description="Images, exact positions: indexes in the "
                                                                 "input (0 = first image).")
     at_names: list[str] | None = Field(None, description='Images, exact positions: file names, e.g. '
                                                          '["IMG_0042.jpg"].')
-    snap_s: float = Field(0, ge=0, le=10, description="Video, exact positions: when the exact frame is clearly "
-                          "blurrier (under 80 %) than the sharpest within ± N seconds, use that one instead; sharp "
-                          "positions stay exact (0.5 suits handheld video).")
+    snap_s: float = Field(0, ge=0, le=10, description="Video, exact positions (in select or in panels[]): when "
+                          "the exact frame is clearly blurrier (under 80 %) than the sharpest within ± N seconds, use "
+                          "the nearest frame there that is not; sharp positions stay exact (0.5 suits handheld "
+                          "video). warnings lists the positions moved.")
     start_s: float | None = Field(None, ge=0, description="Video: only this part, from this second...")
     end_s: float | None = Field(None, gt=0, description="Video: ... to this second.")
     start_pct: float | None = Field(None, ge=0, le=100, description="Only this part, from this % (0 = first "
@@ -416,8 +420,9 @@ class Panel(Model):
     """One panel's notes (all optional). Without positions, panels[i] goes with the i-th chosen
     panel. With positions (all panels must have one), the panels themselves are the selection:
     each shows the frame or image it names, in the given order."""
-    frame: int | None = Field(None, ge=0, description="Video: frame number this panel shows.")
-    at_s: float | None = Field(None, ge=0, description="Video: second this panel shows.")
+    frame: int | None = Field(None, ge=0, description="Video: frame number this panel shows (select.snap_s "
+                                                       "applies).")
+    at_s: float | None = Field(None, ge=0, description="Video: second this panel shows (select.snap_s applies).")
     at_pct: float | None = Field(None, ge=0, le=100, description="Position this panel shows, in %.")
     image: int | None = Field(None, ge=0, description="Images: index of the image this panel shows (0 = first).")
     image_name: str | None = Field(None, description="Images: file name of the image this panel shows.")
@@ -613,32 +618,48 @@ FileName = Annotated[str, AfterValidator(_safe_name)]
 
 class AnimationSpec(Model):
     """Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an
-    image of sample frames and the JSON are always written too: they are what an assistant can look at."""
+    image of sample frames and the JSON are always written too: they are what an assistant can look at.
+    An animatic shows one card at a time: the panel drawn as in layout.template (header, number and
+    caption, picture, its notes whenever panels[] has notes, with any template, and footer), as big as
+    max_side allows; with layout.page "16:9" (or "A4", "Letter") the card, and the video, have that
+    shape (the panel is scaled to fit with its caption and notes). A clean 16:9 slideshow, only the
+    pictures: layout {"page": "16:9", "header": false, "footer": false, "label": {"show": false}} and
+    animation {"progress": false}; add layout "aspect": "16:9" and "fit": "cover" to fill the frame
+    without bands (cropping pictures of another shape)."""
     kind: _ci(Literal["auto", "mosaic", "animatic"]) = Field(
         "auto", description='"mosaic" (video input): the page itself, with every panel playing its part of the '
                             "video in a loop, all at once, and a progress bar under each panel. \"animatic\": the "
-                            "panels one after another, each on screen for its duration, with its number, caption "
-                            "and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. "
-                            '"auto" (default): mosaic for video, animatic for images.')
+                            "panels one after another as still cards, each on screen for its duration, with its "
+                            "number, caption and notes, and a cut, fade or dissolve between them; with images, a "
+                            'timed slideshow. "auto" (default): mosaic for video, animatic for images.')
     fps: int = Field(12, ge=1, le=30, description="Frames per second of the animation.")
     duration_s: float | None = Field(
         None, gt=0, le=MAX_VIDEO_S, description="Length of the video, s. Mosaic: the loop (default: the longest "
                                                 "part a panel plays, at most 8 s); a longer part plays faster, a "
                                                 "shorter one starts over. Animatic: the total (default: the sum of "
-                                                "the panel durations); if given, every duration is scaled to fit. "
-                                                f"At most {MAX_VIDEO_S} s and {MAX_VIDEO_FRAMES} frames "
-                                                "(duration_s × fps).")
+                                                "the panel durations); if given, every duration and transition is "
+                                                "scaled to fit (videos[].scale; the captions keep the shots' own "
+                                                f"durations). At most {MAX_VIDEO_S} s and {MAX_VIDEO_FRAMES} frames "
+                                                "(duration_s × fps). Smaller files: a lower max_side, fps or "
+                                                "duration_s (quality does not change a gif).")
     panel_s: float = Field(2.0, ge=0.1, le=60, description="Animatic: seconds on screen for a panel without a "
                            'duration of its own (panels[].duration_s, or the shot length in select mode "shots").')
     transition: _ci(Literal["cut", "fade", "dissolve"]) = Field(
-        "cut", description='Animatic: transition after a panel without one of its own: "cut", "fade" (through '
-                           'black) or "dissolve" (mixes into the next). panels[].transition, and in select mode '
-                           '"shots" the detected transitions, come first.')
+        "cut", description='Animatic: transition out of a panel (into the next one) when it has none of its own: '
+                           '"cut", "fade" (through black) or "dissolve" (mixes into the next). panels[].transition, '
+                           'and in select mode "shots" the detected transitions, come first. After the last panel '
+                           "a fade or dissolve fades to black, but in gif and webp a dissolve goes back into the "
+                           "first panel, so the loop has no jump.")
     fade_s: float = Field(0.5, gt=0, le=5, description="Animatic: length of each fade or dissolve, s (never more "
-                                                       "than half a panel).")
+                                                       "than half a panel). Transitions do not lengthen the video: "
+                                                       "a dissolve is centred on the change and a fade takes the end "
+                                                       "of one panel and the start of the next, so the total is the "
+                                                       'sum of the durations. In select mode "shots" the detected '
+                                                       "lengths are used instead.")
     max_side: int | None = Field(None, ge=64, le=3840, description="Longest side of the video, px; the page or "
                                  "panel is scaled down to fit. Default: 1920 for mp4 and webm, 960 for gif and "
-                                 "webp (gif and webp: at most 1280).")
+                                 "webp (gif and webp: at most 1280). For a light file: 640 (with fps 8, a 6-panel "
+                                 "mosaic of 3.3 s is about 1.6 MB as gif and 0.4 MB as webp with quality 60).")
     progress: bool = Field(True, description="Progress bars: one under each panel showing where its part is "
                                              "(mosaic), or one along the bottom with a mark per panel (animatic).")
 
@@ -664,15 +685,21 @@ class StoryboardOutput(Model):
     csv_style: _ci(Literal["standard", "excel_es"]) = Field(
         "standard", description='"standard": comma separator, dot decimals, English column names, every column. '
                                 '"excel_es": for Excel in Spanish (and other languages with decimal commas): '
-                                "semicolon separator, decimal commas, Spanish column names, no always-empty "
-                                "columns, and panel numbers kept as text (3.1 is not turned into a date).")
+                                "semicolon separator, decimal commas, Spanish column names and transitions (the "
+                                "words of the captions: corte, encadenado, fundido a negro...), no always-empty columns, and panel numbers kept as text (3.1 is not "
+                                "turned into a date). Columns: n, number, page, frame, time_s, timecode, pct (the "
+                                "panel's frame), shot_in_s, shot_out_s, shot_first_frame, shot_last_frame, "
+                                "transition_in(_s), transition_out(_s) (mode \"shots\"), image, name, the notes, "
+                                "sharpness, colors, file, size, source. duration_s: the planned one, or the shot's.")
     frames: bool = Field(False, description="Also save each panel's picture at full size in <dir>/<name>_frames/ "
                                             "(video frames as JPEG, images copied unchanged).")
     also_without_labels: bool = Field(False, description="Also write the pages without captions "
                                                          "(<name>_nolabels...).")
     color_script: bool = Field(False, description="Also write the colour script: <name>_colors.png, a strip with "
-                               "the dominant colours of each panel, in order (with each picture above when it "
-                               "fits), and add colors (hex and % of the picture) to each panel in the JSON.")
+                               "the dominant colours of each panel's picture (one frame per panel), in order, with "
+                               "the picture above, the hex and % of each colour and the panel's time or name when "
+                               "they fit; and add colors (hex and % of the picture) to each panel in the JSON. The "
+                               "answer's preview includes the strip.")
     color_count: int = Field(5, ge=1, le=12, description="Colour script: dominant colours per panel.")
     preview: bool = Field(True, description="Include a small image of page 1 in the answer (and, with an animated "
                                             "format, of the sample frames).")
@@ -790,7 +817,9 @@ class PanelResult(Model):
     size: list[int] | None = Field(None, description="[width, height] of file, px.")
     notes: dict[str, Any] | None = Field(None, description="The panel's notes, as given in panels[].")
     shot_in_s: float | None = Field(None, description='Select mode "shots": when the shot starts (its first '
-                                                      "frame), s.")
+                                                      "frame), s. At a dissolve the change is put in its middle; "
+                                                      "plain (black) frames between two shots: in their middle "
+                                                      "after a fade, at the cut otherwise.")
     shot_out_s: float | None = Field(None, description='Mode "shots": when it ends: the next shot\'s first frame, '
                                                        "or the end of the range, s.")
     duration_s: float | None = Field(None, description='Mode "shots": shot_out_s - shot_in_s, s.')
@@ -811,6 +840,10 @@ class PanelResult(Model):
                                                   "4 = four times faster).")
     video_s: list[float] | None = Field(None, description="Animatic: [start, end] when this panel is on screen in "
                                                           "the video, s.")
+    video_transition: Literal["cut", "fade", "dissolve"] | None = Field(
+        None, description="Animatic: how this panel goes into the next one (the last one: how the video ends; a "
+                          "dissolve there goes back into the first panel).")
+    video_transition_s: float | None = Field(None, description="Animatic: length of that fade or dissolve, s.")
 
 
 class PageResult(Model):
@@ -858,7 +891,10 @@ class VideoResult(Model):
                                    "loops them.")
     samples: str = Field(description="PNG with sample frames of the video and their times: open it to see what the "
                                      "video looks like.")
-    sample_times_s: list[float] = Field(description="Times of those frames in the video, s.")
+    sample_times_s: list[float] = Field(description="Times of those frames in the video, s (animatic: the middle "
+                                                    "of every panel and of every transition).")
+    scale: float | None = Field(None, description="Animatic: factor applied to every duration and transition to "
+                                                  "fit animation.duration_s (1 = as given).")
 
 
 class StoryboardResult(Model):
@@ -1220,30 +1256,44 @@ class VideoSource:
         finally:
             c.close()
 
-    def near(self, t: float, snap_s: float, analysis_width: int):
-        """The frame at t (or the sharpest within ± snap_s): (index, time, sharpness, full image)."""
+    def near(self, t: float, snap_s: float, analysis_width: int, probe_s: float = 0.0):
+        """The frame at t, or, when it is clearly blurrier (under 80 %) than the sharpest within
+        ± snap_s, the nearest one that is not: (index, time, sharpness, full image, local best).
+        probe_s > 0 (without snap_s) also measures the frames within ± probe_s, only to give the
+        sharpness of the sharpest of them as local best (else None)."""
         last_i = (self.frames - 1) if self.frames else None
         if snap_s <= 0 and t <= 0:
             for i, ft, fr in self.decode():
-                return 0, 0.0, self.sharpness(fr, analysis_width), self._image(fr)
+                return 0, 0.0, self.sharpness(fr, analysis_width), self._image(fr), None
         if snap_s <= 0 and last_i is not None and t >= self.span - 0.5 / self.fps:
             found = None
             for i, ft, fr in self.around(self.span, 1.0 / self.fps):
                 found = fr
             if found is not None:
-                return last_i, self.span, self.sharpness(found, analysis_width), self._image(found)
-        cands = [(i, ft, self.sharpness(fr, analysis_width) if snap_s > 0 else 0.0, fr)
-                 for i, ft, fr in self.around(t, snap_s)]
+                return last_i, self.span, self.sharpness(found, analysis_width), self._image(found), None
+        probe = snap_s <= 0 < probe_s
+        cands = []
+        for i, ft, fr in self.around(t, snap_s if snap_s > 0 else probe_s):
+            if snap_s > 0:
+                sc = self.sharpness(fr, analysis_width)
+            elif probe:
+                sc = _sharpness(self._image(fr, analysis_width), analysis_width)   # not a candidate: not counted
+            else:
+                sc = 0.0
+            cands.append((i, ft, sc, fr))
         if not cands:
             raise ToolError(f"no frame found near {t:.2f} s")
         exact = min(cands, key=lambda c: abs(c[1] - t))
-        sharpest = max(cands, key=lambda c: c[2])
-        i, ft, sc, fr = sharpest if (snap_s > 0 and exact[2] < 0.8 * sharpest[2]) else exact
+        best = max(c[2] for c in cands)
+        if snap_s > 0 and exact[2] < 0.8 * best:      # the nearest frame that is sharp enough
+            i, ft, sc, fr = min((c for c in cands if c[2] >= 0.8 * best), key=lambda c: abs(c[1] - t))
+        else:
+            i, ft, sc, fr = exact
         if snap_s <= 0:
             sc = self.sharpness(fr, analysis_width)
         if last_i is not None:
             i = min(i, last_i)
-        return i, max(0.0, ft), sc, self._image(fr)
+        return i, max(0.0, ft), sc, self._image(fr), (best if probe else None)
 
     def sharpness(self, fr, analysis_width: int) -> float:
         sc = _sharpness(self._image(fr, analysis_width), analysis_width)
@@ -1325,7 +1375,7 @@ class VideoSource:
                     break
             return
         for p in rest:
-            *_, im = self.near(p.t, 0, 64)
+            im = self.near(p.t, 0, 64)[3]
             sink(p, im)
 
 
@@ -1488,6 +1538,7 @@ def _find_cuts(s: ShotScan, min_shot_s: float) -> tuple[list[_Cut], tuple, tuple
     n, fps, T = len(s.d1), s.fps, s.thr
     d1, d2, luma, sd = s.d1, s.d2, s.luma, s.sd
     flat = [v < FLAT_STD for v in sd]
+    m = max(1, round(min_shot_s * fps))               # shortest shot, frames
     covered = bytearray(n)
     cuts: list[_Cut] = []
     head, tail = ("start", 0, None), ("end", 0, None)
@@ -1544,17 +1595,32 @@ def _find_cuts(s: ShotScan, min_shot_s: float) -> tuple[list[_Cut], tuple, tuple
         i_in = inside(b, -1, b - a - i_out, ref) if f_in else 0
         n_out, n_in = (w_out + i_out if f_out else 0), (w_in + i_in if f_in else 0)
         mark(a - n_out - 1, b + n_in + 1)
+        held = (b - i_in) - (a + i_out) + 1 >= max(m, round(fps))   # 1 s or more of it: a shot of its own
         if a == 0 and b == n - 1:
             continue                                   # the whole range is plain: one shot
-        if a == 0:
-            head = ("fade_in", n_in, color) if f_in else ("start", 0, None)
+        if a == 0:                                     # starts plain: fading in from it, or a plain shot
+            if f_in:
+                head = ("fade_in", n_in, color)
+            elif held:
+                cuts.append(_Cut(b + 1, "cut", "cut", strength=1000.0))
             continue
         if b == n - 1:
-            tail = ("fade_out", n_out, color) if f_out else ("end", 0, None)
+            if f_out:
+                tail = ("fade_out", n_out, color)
+            elif held:
+                cuts.append(_Cut(a, "cut", "cut", strength=1000.0))
             continue
-        lo, hi = a + i_out, b - i_in                   # the plain frames held between the two shots
-        cuts.append(_Cut((lo + hi + 1) // 2, "fade_out" if f_out else "cut", "fade_in" if f_in else "cut",
-                         n_out, n_in, n_out, n_in, color, 1000.0))
+        if f_out and f_in:                             # fade out, hold, fade in: the change in the middle
+            mid = (a + i_out + b - i_in + 1) // 2
+            cuts.append(_Cut(mid, "fade_out", "fade_in", n_out, n_in, n_out, n_in, color, 1000.0))
+        elif f_out:                                    # fade out, hold, cut: the hold ends the shot before
+            cuts.append(_Cut(b + 1, "fade_out", "cut", n_out, 0, n_out, 0, color, 1000.0))
+        elif f_in:                                     # cut, hold, fade in: the hold starts the next one
+            cuts.append(_Cut(a, "cut", "fade_in", 0, n_in, 0, n_in, color, 1000.0))
+        elif held:                                     # cut, a plain shot (black, a card of one colour), cut
+            cuts += [_Cut(a, "cut", "cut", strength=1000.0), _Cut(b + 1, "cut", "cut", strength=1000.0)]
+        else:                                          # a few plain frames between two cuts: one cut
+            cuts.append(_Cut((a + b + 1) // 2, "cut", "cut", strength=1000.0))
     # 2. cuts: a jump that stands out from the movement around it and is not a flash
     w = max(3, round(fps / 4))
     for i in range(1, n):
@@ -1595,7 +1661,6 @@ def _find_cuts(s: ShotScan, min_shot_s: float) -> tuple[list[_Cut], tuple, tuple
         mark(c - length // 2 - 1, c + length // 2 + 1)
         i = j + 1
     # 4. no shot shorter than min_shot_s: of two boundaries too close, keep the stronger
-    m = max(1, round(min_shot_s * fps))
     kept: list[_Cut] = []
     for cu in sorted(cuts, key=lambda x: x.split):
         if cu.split < m or n - cu.split < m:
@@ -1746,7 +1811,9 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
     warnings: list[str] = []
     n_items = src.count
     if n_items <= 0:
-        raise ToolError("input: the video has no frames")
+        raise ToolError(f"input.video: no frames can be read from {Path(src.path).name} (it gives no length nor "
+                        "number of frames). An animated WebP cannot be read as a video: use the GIF, MP4 or WebM "
+                        "version, or convert it")
     if video:
         span = src.span
         t0 = sel.start_s if sel.start_s is not None else (span * sel.start_pct / 100 if sel.start_pct is not None else 0.0)
@@ -1811,6 +1878,7 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
     # ---- panels choose themselves / exact positions
     if pos_panels or exact:
         picks: list[Pick] = []
+        local_best: list[float | None] = []        # video, few positions: sharpest frame around each one
         if video:
             if pos_panels:
                 targets = [(p.frame / src.fps if p.frame is not None else p.at_s if p.at_s is not None
@@ -1835,13 +1903,22 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
             if late:
                 warnings.append(f"panels: {len(late)} position(s) after the last frame ({src.span:.2f} s) were "
                                 "moved to the last frame")
-            seen = set()
+            seen, moved = set(), []
+            probe = 0.5 if (sel.snap_s <= 0 and len(targets) <= 24) else 0.0   # few positions: check around
             for tg, note in targets:
-                i, t, sc, im = src.near(min(max(tg, 0.0), src.span), sel.snap_s, sel.analysis_width)
+                tg = min(max(tg, 0.0), src.span)
+                i, t, sc, im, local = src.near(tg, sel.snap_s, sel.analysis_width, probe)
                 if note is None and i in seen:
                     continue
                 seen.add(i)
+                if sel.snap_s > 0 and abs(t - tg) > 0.75 / src.fps:
+                    moved.append((tg, t))
                 picks.append(Pick(key=i, t=t, sharpness=sc, note=note, image=im, exact_index=False))
+                local_best.append(local)
+            if moved:
+                warnings.append(f"select.snap_s: {len(moved)} position(s) were on blurred frames and moved to the "
+                                "nearest sharp one: " + ", ".join(f"{a:.2f} → {b:.2f} s" for a, b in moved[:8])
+                                + (" …" if len(moved) > 8 else ""))
         else:
             names = {p.name: k for k, p in enumerate(src.paths)}
             lower = {p.name.lower(): k for k, p in enumerate(src.paths)}
@@ -1886,14 +1963,16 @@ def choose(src, sel: SelectSpec, panels: list[Panel]) -> Chosen:
             raise ToolError(f"select: {len(picks)} panels; the limit is {MAX_PANELS}")
         if not pos_panels:
             _notes_by_order(picks, panels, warnings)
-        if video and len(picks) > 2:
+        if video:                                  # blurred: next to the other panels, or to the frames around
             top = max(p.sharpness for p in picks)
-            blurry = [str(k + 1) for k, p in enumerate(picks) if p.sharpness < 0.5 * top]
+            blurry = [str(k + 1) for k, p in enumerate(picks)
+                      if (len(picks) > 2 and p.sharpness < 0.5 * top)
+                      or (k < len(local_best) and local_best[k] and p.sharpness < 0.5 * local_best[k])]
             if blurry:
                 warnings.append(f"select: panel(s) {', '.join(blurry)} look blurred (sharpness under half the "
-                                "sharpest panel's); "
+                                "sharpest panel's, or the sharpest frame within 0.5 s); "
                                 + ("raise snap_s" if sel.snap_s else "add snap_s (e.g. 0.5)")
-                                + " to use a sharp frame nearby, or move the positions (start_s)")
+                                + " to use the nearest sharp frame, or move the positions (start_s)")
         return Chosen(picks, [], "panels" if pos_panels else "positions", rng_s, rng_pct, len(src.measured), 0.0,
                       _stats(src.measured), pct_of, warnings)
 
@@ -2745,11 +2824,14 @@ class _Slot:
     fade_out: float = 0.0       # to black
     mix_in: float = 0.0         # dissolve with the panel before (whole length, centred on start)
     mix_out: float = 0.0        # dissolve with the next one (centred on end)
+    mix_first: float = 0.0      # the last panel of a looping gif / webp: dissolves into the first one
 
 
-def animatic_timeline(picks: list[Pick], A: AnimationSpec) -> tuple[list[_Slot], float]:
+def animatic_timeline(picks: list[Pick], A: AnimationSpec, loop: bool = False) -> tuple[list[_Slot], float, float]:
     """Duration and transitions of every panel: panels[].duration_s / transition first, then what
-    shot detection found, then panel_s / transition; scaled to duration_s if given."""
+    shot detection found, then panel_s / transition; scaled to duration_s if given. After the last
+    panel a fade or dissolve fades to black, except that in a loop (gif, webp) a dissolve goes back
+    into the first panel. Returns (slots, total, scale)."""
     n = len(picks)
     durs = [p.note.duration_s if p.note and p.note.duration_s else
             (p.shot.t_out - p.shot.t_in) if p.shot else A.panel_s for p in picks]
@@ -2769,6 +2851,8 @@ def animatic_timeline(picks: list[Pick], A: AnimationSpec) -> tuple[list[_Slot],
         kind = _transition_of(user) if user else A.transition
         if kind == "dissolve" and k + 1 < n:
             slots[k].mix_out = slots[k + 1].mix_in = A.fade_s
+        elif kind == "dissolve" and loop and n > 1:
+            slots[k].mix_first = A.fade_s
         elif kind in ("fade", "dissolve"):               # a dissolve into nothing (the last panel) fades out
             slots[k].fade_out = A.fade_s
             if k + 1 < n:
@@ -2780,11 +2864,11 @@ def animatic_timeline(picks: list[Pick], A: AnimationSpec) -> tuple[list[_Slot],
         d *= f
         sl.start, sl.end = t, t + d
         sl.fade_in, sl.fade_out = min(sl.fade_in * f, d / 2), min(sl.fade_out * f, d / 2)
-        sl.mix_in, sl.mix_out = min(sl.mix_in * f, d), min(sl.mix_out * f, d)
+        sl.mix_in, sl.mix_out, sl.mix_first = min(sl.mix_in * f, d), min(sl.mix_out * f, d), min(sl.mix_first * f, d / 2)
         t += d
     for a, b in zip(slots, slots[1:]):                   # a dissolve fits in both panels
         a.mix_out = b.mix_in = min(a.mix_out, b.mix_in)
-    return slots, t
+    return slots, t, f
 
 
 def plan_card(L: LayoutSpec, O: StoryboardOutput, look: Look, aspect: float, notes_on: bool,
@@ -2797,6 +2881,11 @@ def plan_card(L: LayoutSpec, O: StoryboardOutput, look: Look, aspect: float, not
     text = max(14, round(side / 64))
     lk.user_sizes = {"label_size": label, "number_size": round(label * 1.45), "notes_size": max(12, round(label * 0.92)),
                      "text_size": text, "title_size": round(text * 1.3)} | look.user_sizes
+    if L.page != "auto":                               # a fixed page (16:9, A4...) is the size of the video
+        Lc = L.model_copy(update={"columns": 1, "rows": 1})
+        geo = _plan(Lc, O, lk, 1, aspect, notes_on, notes)
+        geo.rows_per_page = 1
+        return geo, lk, Lc, max(geo.lines or [0]), (geo.page_w, geo.page_h)
     pw = side
     for _ in range(4):
         Lc = L.model_copy(update={"columns": 1, "rows": 1, "page": "auto", "panel_width": max(64, pw)})
@@ -2818,7 +2907,7 @@ def make_animatic(picks: list[Pick], views: list[View], card_pics: dict[int, byt
     """The panels one after another, each drawn as a card (the page template, one panel), with its
     duration and its cut, fade or dissolve."""
     A, fps = O.animation, O.animation.fps
-    slots, total = animatic_timeline(picks, A)
+    slots, total, scale = animatic_timeline(picks, A, loop=O.format in ("gif", "webp"))
     if total > MAX_VIDEO_S:
         raise ToolError(f"output.animation.duration_s: the animatic would last {total:.0f} s (the sum of the panel "
                         f"durations); the limit is {MAX_VIDEO_S} s. Give output.animation.duration_s to scale it "
@@ -2848,6 +2937,8 @@ def make_animatic(picks: list[Pick], views: list[View], card_pics: dict[int, byt
         im = card_image(k)
         if sl.mix_out and k + 1 < len(slots) and t > sl.end - sl.mix_out / 2:
             im = Image.blend(im, card_image(k + 1), min(1.0, (t - sl.end + sl.mix_out / 2) / sl.mix_out))
+        elif sl.mix_first and t > sl.end - sl.mix_first:
+            im = Image.blend(im, card_image(0), min(1.0, (t - sl.end + sl.mix_first) / sl.mix_first))
         elif sl.mix_in and k > 0 and t < sl.start + sl.mix_in / 2:
             im = Image.blend(card_image(k - 1), im, max(0.0, (t - sl.start + sl.mix_in / 2) / sl.mix_in))
         elif sl.fade_out and t > sl.end - sl.fade_out:
@@ -2866,20 +2957,38 @@ def make_animatic(picks: list[Pick], views: list[View], card_pics: dict[int, byt
                     d.rectangle((xx - 1, H - bar_h, xx, H - 1), fill=_rgb(look.text))
         return im
 
-    mids = [min(F - 1, int((sl.start + sl.end) / 2 * fps)) for sl in slots]
+    def at(t: float) -> int:                           # the frame showing time t
+        return max(0, min(F - 1, round(t * fps - 0.5)))
+
+    mids = [at((sl.start + sl.end) / 2) for sl in slots]
     path = out_dir / f"{name}.{O.format}"
     codec = _write_video(path, O.format, (W, H), fps, O.quality, F, frame,
                          sorted(set(mids[:: max(1, len(mids) // 24)]) | {0, F - 1}))
-    pick = sorted({round(i * (len(mids) - 1) / 11) for i in range(12)}) if len(mids) > 12 else range(len(mids))
-    js = [mids[k] for k in pick]
+    tr, num = strings["trans"], [v.number for v in views]
+    events = [(mids[k], f"{strings['panel']} {num[k]}") for k in range(len(slots))]
+    for k, sl in enumerate(slots):                     # the samples show the transitions too
+        if sl.mix_out and k + 1 < len(slots):
+            events.append((at(sl.end), f"{tr['dissolve']} {num[k]}–{num[k + 1]}"))
+        if sl.mix_first:
+            events.append((at(sl.end - sl.mix_first / 2), f"{tr['dissolve']} {num[k]}–{num[0]}"))
+        if sl.fade_out:
+            events.append((at(sl.end - sl.fade_out / 2), f"{num[k]}: {tr['fade_out']['black']}"))
+        if sl.fade_in:
+            events.append((at(sl.start + sl.fade_in / 2), f"{num[k]}: {tr['fade_in']['black']}"))
+    first: dict[int, str] = {}
+    for j, cap in sorted(events):                      # one sample per frame, in order
+        first.setdefault(j, cap)
+    events = sorted(first.items())
+    if len(events) > 16:
+        events = [events[round(i * (len(events) - 1) / 15)] for i in range(16)]
     title = f"{strings['samples']} · {path.name} · {W}×{H} · {fps} fps · {F / fps:.1f} s"
     spath = path.with_name(path.stem + "_samples.png")
-    _samples_image([(f"{j / fps:.1f} s · {strings['panel']} {views[k].number}", frame(j)) for k, j in zip(pick, js)],
-                   look, title, 4).save(spath, optimize=True)
+    _samples_image([(f"{j / fps:.1f} s · {cap}", frame(j)) for j, cap in events], look, title, 4).save(
+        spath, optimize=True)
     video = VideoResult(kind="animatic", path=str(path), format=O.format, codec=codec, size=[W, H], fps=fps,
                         frames=F, duration_s=round(F / fps, 3), bytes=path.stat().st_size,
                         loop=O.format in ("gif", "webp"), samples=str(spath),
-                        sample_times_s=[round(j / fps, 2) for j in js])
+                        sample_times_s=[round(j / fps, 2) for j, _ in events], scale=round(scale, 4))
     return video, slots
 
 
@@ -2895,10 +3004,11 @@ def dominant_colors(im: Image.Image, n: int) -> list[ColorShare]:
             for c, i in counts]
 
 
-def color_script_image(colors: list[list[ColorShare]], numbers: list[str], pictures: list[Image.Image],
-                       look: Look, title: str, subtitle: str) -> Image.Image:
+def color_script_image(colors: list[list[ColorShare]], numbers: list[str], captions: list[str],
+                       pictures: list[Image.Image], look: Look, title: str, subtitle: str) -> Image.Image:
     """The colour script: one column per panel, in order, with its picture on top (when wide enough),
-    its dominant colours stacked by share, and its number."""
+    its dominant colours stacked by share (with their hex and % when they fit), its number and its
+    time or name."""
     n = len(colors)
     cw = max(16, min(160, 2400 // max(1, n)))
     gap = 6 if cw >= 60 else 3 if cw >= 30 else 1
@@ -2906,10 +3016,12 @@ def color_script_image(colors: list[list[ColorShare]], numbers: list[str], pictu
     th = round(cw * pictures[0].height / max(1, pictures[0].width)) if cw >= 40 and pictures else 0
     band = max(160, round(cw * 1.5))
     nfs = max(10, min(22, cw // 4))
-    num_h = round(nfs * 1.8) if cw >= 24 else 0
+    cfs = max(9, min(15, cw // 9))
+    num_h = round(nfs * 1.6) if cw >= 24 else 0
+    cap_h = round(cfs * 1.6) if cw >= 60 else 0
     W = 2 * pad + n * cw + (n - 1) * gap
     head = round(fs * 1.3) + round(fs * 0.85 * 1.6)
-    H = pad + head + pad // 2 + (th + gap if th else 0) + band + num_h + pad
+    H = pad + head + pad // 2 + (th + gap if th else 0) + band + num_h + cap_h + pad
     page = Image.new("RGB", (max(W, 480), H), _rgb(look.bg))
     d = ImageDraw.Draw(page)
     d.text((pad, pad), _ellipsize(d, title, look.font(fs * 1.15, bold=True), page.width - 2 * pad),
@@ -2917,7 +3029,8 @@ def color_script_image(colors: list[list[ColorShare]], numbers: list[str], pictu
     d.text((pad, pad + round(fs * 1.45)), _ellipsize(d, subtitle, look.font(fs * 0.85), page.width - 2 * pad),
            font=look.font(fs * 0.85), fill=_rgb(look.text2))
     y0 = pad + head + pad // 2
-    for k, (cols, num) in enumerate(zip(colors, numbers)):
+    small = look.font(cfs)
+    for k, (cols, num, cap) in enumerate(zip(colors, numbers, captions)):
         x = pad + k * (cw + gap)
         y = y0
         if th:
@@ -2927,10 +3040,18 @@ def color_script_image(colors: list[list[ColorShare]], numbers: list[str], pictu
         yy = y
         for j, c in enumerate(cols):
             h = (y + band - yy) if j == len(cols) - 1 else round(band * c.pct / total)
-            d.rectangle((x, yy, x + cw - 1, yy + max(1, h) - 1), fill=ImageColor.getrgb(c.hex))
+            rgb = ImageColor.getrgb(c.hex)
+            d.rectangle((x, yy, x + cw - 1, yy + max(1, h) - 1), fill=rgb)
+            if cw >= 84 and h >= cfs + 6:                # the hex and the share, in black or white
+                ink = (0, 0, 0) if 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] > 140 else (255, 255, 255)
+                d.text((x + 5, yy + 3), f"{c.hex} {c.pct:g}%", font=small, fill=ink)
             yy += h
+        d.rectangle((x - 1, y - 1, x + cw, y + band), outline=_rgb(look.border))   # dark colours on a dark page
         if num_h:
-            d.text((x + cw / 2, y + band + num_h / 2), num, font=look.font(nfs, bold=True),
+            d.text((x + cw / 2, y + band + num_h / 2 + 2), num, font=look.font(nfs, bold=True),
+                   fill=_rgb(look.text2), anchor="mm")
+        if cap_h:
+            d.text((x + cw / 2, y + band + num_h + cap_h / 2), _ellipsize(d, cap, small, cw), font=small,
                    fill=_rgb(look.text2), anchor="mm")
     return page
 
@@ -3058,7 +3179,10 @@ CSV_ES = {"n": "n", "number": "viñeta", "page": "página", "frame": "fotograma"
           "camera": "cámara", "action": "acción", "dialogue": "diálogo", "sound": "sonido",
           "transition": "transición", "duration_s": "duración (s)", "sharpness": "nitidez", "file": "archivo",
           "size": "tamaño", "source": "original", "shot_in_s": "entrada (s)", "shot_out_s": "salida (s)",
-          "transition_in": "transición de entrada", "transition_out": "transición de salida", "colors": "colores"}
+          "transition_in": "transición de entrada", "transition_out": "transición de salida", "colors": "colores",
+          "shot_first_frame": "primer fotograma", "shot_last_frame": "último fotograma",
+          "transition_in_s": "transición de entrada (s)", "transition_out_s": "transición de salida (s)"}
+
 
 
 def _flatten(im: Image.Image) -> Image.Image:
@@ -3320,16 +3444,25 @@ def tool_make_storyboard(args: StoryboardArgs):
         video, slots = make_animatic(picks, views, card_pics, card_notes, card, look, O, (title, subtitle), footers,
                                      strings, name, out_dir)
         videos = [video]
-        for r, sl in zip(results, slots):
+        for k, (r, sl) in enumerate(zip(results, slots)):
             r.video_s = [round(sl.start, 3), round(sl.end, 3)]
+            nxt = slots[k + 1] if k + 1 < len(slots) else None
+            if sl.mix_out or sl.mix_first:
+                r.video_transition, length = "dissolve", sl.mix_out or sl.mix_first
+            elif sl.fade_out or (nxt and nxt.fade_in):
+                r.video_transition, length = "fade", sl.fade_out + (nxt.fade_in if nxt else 0.0)
+            else:
+                r.video_transition, length = "cut", 0.0
+            r.video_transition_s = round(length, 3) if length else None
 
     color_path = None
     if O.color_script:
         sub = f"{len(picks)} {strings['panels']} · {O.color_count} {strings['colors']}"
-        img = color_script_image([colors[k] for k in range(len(picks))], [v.number for v in views],
-                                 [v.picture for v in views], look, f"{strings['color_script']} · {title}", sub)
+        caps = [_hms(p.shot.t_in if p.shot else p.t) if src.kind == "video" else src.paths[p.key].name for p in picks]
+        color_img = color_script_image([colors[k] for k in range(len(picks))], [v.number for v in views], caps,
+                                       [v.picture for v in views], look, f"{strings['color_script']} · {title}", sub)
         color_path = out_dir / f"{name}_colors.png"
-        img.save(color_path, optimize=True)
+        color_img.save(color_path, optimize=True)
 
     shot = None
     if O.shot_list:
@@ -3344,15 +3477,21 @@ def tool_make_storyboard(args: StoryboardArgs):
             pc = out_dir / f"{name}_shots.csv"
             note_cols = ("shot", "camera", "action", "dialogue", "sound", "transition", "duration_s")
             cols = ["n", "number", "page", "frame", "time_s", "timecode", "pct", "shot_in_s", "shot_out_s",
-                    "transition_in", "transition_out", "image", "name", *note_cols, "sharpness", "colors", "file",
-                    "size", "source"]
+                    "shot_first_frame", "shot_last_frame", "transition_in", "transition_in_s", "transition_out",
+                    "transition_out_s", "image", "name", *note_cols, "sharpness", "colors", "file", "size", "source"]
             excel = O.csv_style == "excel_es"
 
-            def value(r: dict, c: str):
+            def value(r: dict, c: str, p: Pick):
                 if c == "duration_s":                   # the planned duration, or else the shot's length
                     return (r.get("notes") or {}).get(c, r.get(c))
+                if excel and p.shot and c in ("transition_in", "transition_out"):   # the words of the captions
+                    kind, color = (p.shot.trans_in, p.shot.color_in) if c == "transition_in" else \
+                        (p.shot.trans_out, p.shot.color_out)
+                    return _transition_word(kind, color, STRINGS["es"])
                 if c == "colors":
                     return ", ".join(f"{x['hex']} {x['pct']:g}%" for x in r.get("colors") or [])
+                if c in ("shot_first_frame", "shot_last_frame"):
+                    return (r.get("shot_frames") or [None, None])[c == "shot_last_frame"]
                 return (r.get("notes") or {}).get(c) if c in note_cols else r.get(c)
 
             def cell(c, v):
@@ -3362,11 +3501,13 @@ def tool_make_storyboard(args: StoryboardArgs):
                     return "×".join(map(str, v))
                 if excel and c == "number":
                     return f'="{v}"'                    # stays text: "3.1" is not read as a date
+                if excel and c == "timecode":
+                    return v.replace(".", ",")
                 if excel and isinstance(v, float):
                     return f"{v:g}".replace(".", ",")
                 return v
 
-            table = [[cell(c, value(r, c)) for c in cols] for r in rows]
+            table = [[cell(c, value(r, c, p)) for c in cols] for r, p in zip(rows, picks)]
             if excel:                               # for people: Spanish headers, no always-empty columns
                 keep = [j for j in range(len(cols)) if any(row[j] != "" for row in table)]
                 cols = [CSV_ES.get(cols[j], cols[j]) for j in keep]
@@ -3390,6 +3531,8 @@ def tool_make_storyboard(args: StoryboardArgs):
         extra.append(_preview(pages[0]))
         if videos:
             extra.append(_preview(Image.open(videos[0].samples)))
+        if color_path:
+            extra.append(_preview(color_img))
     return result, extra
 
 
@@ -3496,7 +3639,7 @@ EXAMPLES: dict[str, dict[str, Any]] = {
         },
         "animatic": {
             "input": {"video": "/Users/ana/Movies/clip.mp4"},
-            "select": {"at_s": [1.5, 6, 12.5]},
+            "select": {"at_s": [1.5, 6, 12.5], "snap_s": 0.5},
             "panels": [{"shot": "PG", "action": "Amanece.", "duration_s": 3, "transition": "encadenado"},
                        {"shot": "PM", "dialogue": "ANA: Llego tarde.", "duration_s": 2},
                        {"shot": "PP", "action": "Mira el reloj.", "transition": "fundido a negro"}],

@@ -202,10 +202,14 @@ def test_snap_moves_only_blurred_positions(video, tmp_path):
     d = run("make_storyboard", {"input": {"video": str(video)}, "select": {"at_frames": [2, 7, 17], "snap_s": 0.4},
                                 "output": {"dir": str(tmp_path), "preview": False}})
     frames = [p["frame"] for p in d["panels"]]
-    assert frames[1:] == [7, 17] and frames[0] % 10 >= 5, frames     # 2 is blurred: moved; 7 and 17 stay
+    assert frames == [5, 7, 17], frames            # 2 is blurred: the nearest sharp frame; 7 and 17 stay
+    assert any("moved to the nearest sharp one: 0.20 → 0.50 s" in w for w in d["warnings"]), d["warnings"]
     d = run("make_storyboard", {"input": {"video": str(video)}, "select": {"at_frames": [2, 7, 17, 27]},
                                 "output": {"dir": str(tmp_path), "preview": False}})
     assert any("look blurred" in w and "snap_s" in w for w in d["warnings"])
+    d = run("make_storyboard", {"input": {"video": str(video)}, "panels": [{"frame": 2}, {"frame": 12}],
+                                "output": {"dir": str(tmp_path), "preview": False}})
+    assert any("panel(s) 1, 2 look blurred" in w for w in d["warnings"])    # all blurred: the frames around tell
 
 
 def test_fixed_page_uses_only_needed_rows(video, tmp_path):
@@ -366,7 +370,39 @@ def test_shots_finds_cuts_dissolves_and_fades(shots_video, tmp_path):
     rows = list(csv.DictReader(open(d["shot_list"]["csv"], encoding="utf-8-sig")))
     assert (rows[0]["shot_in_s"], rows[0]["shot_out_s"], rows[0]["duration_s"]) == ("0.0", "2.0", "2.0")
     assert rows[1]["transition_out"] == "dissolve" and rows[3]["transition_in"] == "fade_in"
+    assert (rows[1]["shot_first_frame"], rows[1]["shot_last_frame"]) == (str(p[1]["shot_frames"][0]),
+                                                                        str(p[1]["shot_frames"][1]))
+    es = run("make_storyboard", {"input": {"video": str(shots_video)}, "select": {"mode": "shots"},
+                                 "output": {"dir": str(tmp_path), "name": "es", "shot_list": ["csv"],
+                                            "csv_style": "excel_es", "preview": False}})
+    rows = list(csv.DictReader(open(es["shot_list"]["csv"], encoding="utf-8-sig"), delimiter=";"))
+    assert rows[1]["transición de salida"] == "encadenado" and rows[3]["transición de entrada"] == "desde negro"
+    assert rows[2]["transición de salida"] == "fundido a negro"                 # the same words as the captions
+    assert rows[0]["entrada (s)"] == "0" and "," in rows[1]["tiempo"]
     assert json.loads(Path(d["shot_list"]["json"]).read_text())["panels"][2]["transition_out"] == "fade_out"
+
+
+def test_shots_plain_frames(tmp_path):
+    """Black between two cuts: a shot of its own when long, one cut when a few frames; a fade to
+    black followed by a cut keeps the black in the shot that fades."""
+    black = Image.new("RGB", (160, 90))
+    frames = [_shot(0, i) for i in range(20)] + [black] * 10 + [_shot(1, i) for i in range(20)] + [black] * 2
+    frames += [_shot(2, i) for i in range(20)] + [Image.blend(_shot(2, 20 + j), black, (j + 1) / 5) for j in range(5)]
+    frames += [black] * 5 + [_shot(3, i) for i in range(20)]
+    path = tmp_path / "plain.mp4"
+    with av.open(str(path), "w") as c:
+        st = c.add_stream("mpeg4", rate=10)
+        st.width, st.height, st.pix_fmt = 160, 90, "yuv420p"
+        for im in frames:
+            for pkt in st.encode(av.VideoFrame.from_image(im)):
+                c.mux(pkt)
+        for pkt in st.encode():
+            c.mux(pkt)
+    p = run("make_storyboard", {"input": {"video": str(path)}, "select": {"mode": "shots"},
+                                "output": {"dir": str(tmp_path), "preview": False}})["panels"]
+    assert [x["shot_frames"][0] for x in p] == [0, 20, 30, 51, 82]
+    assert [x["transition_out"] for x in p] == ["cut", "cut", "cut", "fade_out", "end"]
+    assert [x["transition_in"] for x in p] == ["start", "cut", "cut", "cut", "cut"]
 
 
 def test_shots_options_labels_and_extract(shots_video, tmp_path):
@@ -428,6 +464,8 @@ def test_animatic_durations_and_transitions(video, tmp_path):
     v = d["videos"][0]
     assert v["kind"] == "animatic" and v["codec"] in ("vp9", "vp8") and v["frames"] == 30 and len(extra) == 2
     assert [x["video_s"] for x in d["panels"]] == [[0.0, 1.0], [1.0, 1.5], [1.5, 3.0]]
+    assert [(x["video_transition"], x.get("video_transition_s")) for x in d["panels"]] == \
+        [("dissolve", 0.2), ("fade", 0.4), ("cut", None)]
     frames = decoded(v["path"])
     assert len(frames) == 30
     light = [ImageStat.Stat(f.convert("L")).mean[0] for f in frames]
@@ -439,6 +477,11 @@ def test_animatic_durations_and_transitions(video, tmp_path):
                                                              "preview": False,
                                                              "animation": {"kind": "animatic", "duration_s": 6}}})
     assert [x["video_s"] for x in d["panels"]] == [[0.0, 1.714], [1.714, 2.571], [2.571, 6.0]]  # 1+0.5+2 s → 6 s
+    assert d["videos"][0]["scale"] == 1.7143
+    d = run("make_storyboard", {"input": {"video": str(video)}, "select": {"count": 2}, "layout": {"page": "16:9"},
+                                "output": {"dir": str(tmp_path), "name": "a3", "format": "mp4", "preview": False,
+                                           "animation": {"kind": "animatic", "max_side": 640}}})
+    assert d["videos"][0]["size"] == [640, 360]                                # the page's shape
 
 
 def test_slideshow_from_images(photos, tmp_path):
@@ -448,7 +491,12 @@ def test_slideshow_from_images(photos, tmp_path):
     v = d["videos"][0]
     assert (v["kind"], v["format"], v["loop"], v["frames"]) == ("animatic", "webp", True, 14)
     assert [x["video_s"] for x in d["panels"][:2]] == [[0.0, 0.5], [0.5, 1.0]]
-    assert len(decoded(v["path"])) == 14 and Path(v["samples"]).is_file()
+    frames = decoded(v["path"])
+    assert len(frames) == 14 and Path(v["samples"]).is_file()
+    a, z = (f.resize((32, 18)) for f in (frames[0], frames[-1]))          # a loop: the last panel dissolves
+    assert srv._difference(a, z) < srv._difference(a, frames[-3].resize((32, 18)))   # into the first one
+    e = err("make_storyboard", {"input": {"video": v["path"]}})
+    assert "An animated WebP cannot be read as a video" in e
 
 
 def test_color_script(photos, tmp_path):
@@ -465,6 +513,9 @@ def test_color_script(photos, tmp_path):
     assert rows[0]["colors"].startswith("#") and "%" in rows[0]["colors"]
     red = srv.dominant_colors(Image.new("RGB", (40, 30), (255, 0, 0)), 4)
     assert [(c.hex, c.pct) for c in red] == [("#ff0000", 100.0)]
+    _, extra = srv.run_tool("make_storyboard", {"input": {"folder": str(photos)},
+                                                "output": {"dir": str(tmp_path), "color_script": True}})
+    assert len(extra) == 2                                   # page 1 and the colour script
 
 
 def test_animation_errors_and_limits(video, photos):

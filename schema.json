@@ -362,11 +362,11 @@
     "$defs": {
      "AnimationSpec": {
       "additionalProperties": false,
-      "description": "Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an\nimage of sample frames and the JSON are always written too: they are what an assistant can look at.",
+      "description": "Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an\nimage of sample frames and the JSON are always written too: they are what an assistant can look at.\nAn animatic shows one card at a time: the panel drawn as in layout.template (header, number and\ncaption, picture, its notes whenever panels[] has notes, with any template, and footer), as big as\nmax_side allows; with layout.page \"16:9\" (or \"A4\", \"Letter\") the card, and the video, have that\nshape (the panel is scaled to fit with its caption and notes). A clean 16:9 slideshow, only the\npictures: layout {\"page\": \"16:9\", \"header\": false, \"footer\": false, \"label\": {\"show\": false}} and\nanimation {\"progress\": false}; add layout \"aspect\": \"16:9\" and \"fit\": \"cover\" to fill the frame\nwithout bands (cropping pictures of another shape).",
       "properties": {
        "kind": {
         "default": "auto",
-        "description": "\"mosaic\" (video input): the page itself, with every panel playing its part of the video in a loop, all at once, and a progress bar under each panel. \"animatic\": the panels one after another, each on screen for its duration, with its number, caption and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. \"auto\" (default): mosaic for video, animatic for images.",
+        "description": "\"mosaic\" (video input): the page itself, with every panel playing its part of the video in a loop, all at once, and a progress bar under each panel. \"animatic\": the panels one after another as still cards, each on screen for its duration, with its number, caption and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. \"auto\" (default): mosaic for video, animatic for images.",
         "enum": [
          "auto",
          "mosaic",
@@ -393,7 +393,7 @@
          }
         ],
         "default": null,
-        "description": "Length of the video, s. Mosaic: the loop (default: the longest part a panel plays, at most 8 s); a longer part plays faster, a shorter one starts over. Animatic: the total (default: the sum of the panel durations); if given, every duration is scaled to fit. At most 300 s and 3600 frames (duration_s × fps)."
+        "description": "Length of the video, s. Mosaic: the loop (default: the longest part a panel plays, at most 8 s); a longer part plays faster, a shorter one starts over. Animatic: the total (default: the sum of the panel durations); if given, every duration and transition is scaled to fit (videos[].scale; the captions keep the shots' own durations). At most 300 s and 3600 frames (duration_s × fps). Smaller files: a lower max_side, fps or duration_s (quality does not change a gif)."
        },
        "panel_s": {
         "default": 2.0,
@@ -404,7 +404,7 @@
        },
        "transition": {
         "default": "cut",
-        "description": "Animatic: transition after a panel without one of its own: \"cut\", \"fade\" (through black) or \"dissolve\" (mixes into the next). panels[].transition, and in select mode \"shots\" the detected transitions, come first.",
+        "description": "Animatic: transition out of a panel (into the next one) when it has none of its own: \"cut\", \"fade\" (through black) or \"dissolve\" (mixes into the next). panels[].transition, and in select mode \"shots\" the detected transitions, come first. After the last panel a fade or dissolve fades to black, but in gif and webp a dissolve goes back into the first panel, so the loop has no jump.",
         "enum": [
          "cut",
          "fade",
@@ -414,7 +414,7 @@
        },
        "fade_s": {
         "default": 0.5,
-        "description": "Animatic: length of each fade or dissolve, s (never more than half a panel).",
+        "description": "Animatic: length of each fade or dissolve, s (never more than half a panel). Transitions do not lengthen the video: a dissolve is centred on the change and a fade takes the end of one panel and the start of the next, so the total is the sum of the durations. In select mode \"shots\" the detected lengths are used instead.",
         "exclusiveMinimum": 0,
         "maximum": 5,
         "type": "number"
@@ -431,7 +431,7 @@
          }
         ],
         "default": null,
-        "description": "Longest side of the video, px; the page or panel is scaled down to fit. Default: 1920 for mp4 and webm, 960 for gif and webp (gif and webp: at most 1280)."
+        "description": "Longest side of the video, px; the page or panel is scaled down to fit. Default: 1920 for mp4 and webm, 960 for gif and webp (gif and webp: at most 1280). For a light file: 640 (with fps 8, a 6-panel mosaic of 3.3 s is about 1.6 MB as gif and 0.4 MB as webp with quality 60)."
        },
        "progress": {
         "default": true,
@@ -940,7 +940,7 @@
          }
         ],
         "default": null,
-        "description": "Video: frame number this panel shows."
+        "description": "Video: frame number this panel shows (select.snap_s applies)."
        },
        "at_s": {
         "anyOf": [
@@ -953,7 +953,7 @@
          }
         ],
         "default": null,
-        "description": "Video: second this panel shows."
+        "description": "Video: second this panel shows (select.snap_s applies)."
        },
        "at_pct": {
         "anyOf": [
@@ -1218,7 +1218,7 @@
          }
         ],
         "default": null,
-        "description": "Video, exact positions: times in seconds (0.0 = first frame).",
+        "description": "Video, exact positions: times in seconds (0.0 = first frame). Times given by a person often fall on a blurred frame: add snap_s (0.5).",
         "examples": [
          [
           1.5,
@@ -1281,7 +1281,7 @@
        },
        "snap_s": {
         "default": 0,
-        "description": "Video, exact positions: when the exact frame is clearly blurrier (under 80 %) than the sharpest within ± N seconds, use that one instead; sharp positions stay exact (0.5 suits handheld video).",
+        "description": "Video, exact positions (in select or in panels[]): when the exact frame is clearly blurrier (under 80 %) than the sharpest within ± N seconds, use the nearest frame there that is not; sharp positions stay exact (0.5 suits handheld video). warnings lists the positions moved.",
         "maximum": 10,
         "minimum": 0,
         "type": "number"
@@ -1469,7 +1469,7 @@
        },
        "csv_style": {
         "default": "standard",
-        "description": "\"standard\": comma separator, dot decimals, English column names, every column. \"excel_es\": for Excel in Spanish (and other languages with decimal commas): semicolon separator, decimal commas, Spanish column names, no always-empty columns, and panel numbers kept as text (3.1 is not turned into a date).",
+        "description": "\"standard\": comma separator, dot decimals, English column names, every column. \"excel_es\": for Excel in Spanish (and other languages with decimal commas): semicolon separator, decimal commas, Spanish column names and transitions (the words of the captions: corte, encadenado, fundido a negro...), no always-empty columns, and panel numbers kept as text (3.1 is not turned into a date). Columns: n, number, page, frame, time_s, timecode, pct (the panel's frame), shot_in_s, shot_out_s, shot_first_frame, shot_last_frame, transition_in(_s), transition_out(_s) (mode \"shots\"), image, name, the notes, sharpness, colors, file, size, source. duration_s: the planned one, or the shot's.",
         "enum": [
          "standard",
          "excel_es"
@@ -1488,7 +1488,7 @@
        },
        "color_script": {
         "default": false,
-        "description": "Also write the colour script: <name>_colors.png, a strip with the dominant colours of each panel, in order (with each picture above when it fits), and add colors (hex and % of the picture) to each panel in the JSON.",
+        "description": "Also write the colour script: <name>_colors.png, a strip with the dominant colours of each panel's picture (one frame per panel), in order, with the picture above, the hex and % of each colour and the panel's time or name when they fit; and add colors (hex and % of the picture) to each panel in the JSON. The answer's preview includes the strip.",
         "type": "boolean"
        },
        "color_count": {
@@ -2298,7 +2298,7 @@
          }
         ],
         "default": null,
-        "description": "Select mode \"shots\": when the shot starts (its first frame), s."
+        "description": "Select mode \"shots\": when the shot starts (its first frame), s. At a dissolve the change is put in its middle; plain (black) frames between two shots: in their middle after a fade, at the cut otherwise."
        },
        "shot_out_s": {
         "anyOf": [
@@ -2455,6 +2455,35 @@
         ],
         "default": null,
         "description": "Animatic: [start, end] when this panel is on screen in the video, s."
+       },
+       "video_transition": {
+        "anyOf": [
+         {
+          "enum": [
+           "cut",
+           "fade",
+           "dissolve"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: how this panel goes into the next one (the last one: how the video ends; a dissolve there goes back into the first panel)."
+       },
+       "video_transition_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: length of that fade or dissolve, s."
        }
       },
       "required": [
@@ -2716,11 +2745,23 @@
         "type": "string"
        },
        "sample_times_s": {
-        "description": "Times of those frames in the video, s.",
+        "description": "Times of those frames in the video, s (animatic: the middle of every panel and of every transition).",
         "items": {
          "type": "number"
         },
         "type": "array"
+       },
+       "scale": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: factor applied to every duration and transition to fit animation.duration_s (1 = as given)."
        }
       },
       "required": [
@@ -3006,7 +3047,8 @@
        1.5,
        6,
        12.5
-      ]
+      ],
+      "snap_s": 0.5
      },
      "panels": [
       {
@@ -3282,7 +3324,7 @@
          }
         ],
         "default": null,
-        "description": "Video, exact positions: times in seconds (0.0 = first frame).",
+        "description": "Video, exact positions: times in seconds (0.0 = first frame). Times given by a person often fall on a blurred frame: add snap_s (0.5).",
         "examples": [
          [
           1.5,
@@ -3345,7 +3387,7 @@
        },
        "snap_s": {
         "default": 0,
-        "description": "Video, exact positions: when the exact frame is clearly blurrier (under 80 %) than the sharpest within ± N seconds, use that one instead; sharp positions stay exact (0.5 suits handheld video).",
+        "description": "Video, exact positions (in select or in panels[]): when the exact frame is clearly blurrier (under 80 %) than the sharpest within ± N seconds, use the nearest frame there that is not; sharp positions stay exact (0.5 suits handheld video). warnings lists the positions moved.",
         "maximum": 10,
         "minimum": 0,
         "type": "number"
@@ -3922,7 +3964,7 @@
          }
         ],
         "default": null,
-        "description": "Select mode \"shots\": when the shot starts (its first frame), s."
+        "description": "Select mode \"shots\": when the shot starts (its first frame), s. At a dissolve the change is put in its middle; plain (black) frames between two shots: in their middle after a fade, at the cut otherwise."
        },
        "shot_out_s": {
         "anyOf": [
@@ -4079,6 +4121,35 @@
         ],
         "default": null,
         "description": "Animatic: [start, end] when this panel is on screen in the video, s."
+       },
+       "video_transition": {
+        "anyOf": [
+         {
+          "enum": [
+           "cut",
+           "fade",
+           "dissolve"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: how this panel goes into the next one (the last one: how the video ends; a dissolve there goes back into the first panel)."
+       },
+       "video_transition_s": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Animatic: length of that fade or dissolve, s."
        }
       },
       "required": [
