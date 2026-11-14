@@ -621,14 +621,17 @@ class AnimationSpec(Model):
     image of sample frames and the JSON are always written too: they are what an assistant can look at.
     An animatic shows one card at a time: the panel drawn as in layout.template (header, number and
     caption, picture, its notes whenever panels[] has notes, with any template, and footer), as big as
-    max_side allows; with layout.page "16:9" (or "A4", "Letter") the card, and the video, have that
-    shape (the panel is scaled to fit with its caption and notes). A clean 16:9 slideshow, only the
+    max_side allows, so by default its shape follows the template and the notes (it is not 16:9);
+    with layout.page "16:9" (or "A4", "Letter") the card, and the video, have that shape (the panel
+    is scaled to fit with its caption and notes). A clean 16:9 slideshow, only the
     pictures: layout {"page": "16:9", "header": false, "footer": false, "label": {"show": false}} and
     animation {"progress": false}; add layout "aspect": "16:9" and "fit": "cover" to fill the frame
     without bands (cropping pictures of another shape)."""
     kind: _ci(Literal["auto", "mosaic", "animatic"]) = Field(
         "auto", description='"mosaic" (video input): the page itself, with every panel playing its part of the '
-                            "video in a loop, all at once, and a progress bar under each panel. \"animatic\": the "
+                            "video in a loop, all at once, and a progress bar under each panel; that part is its "
+                            "stretch (select modes sharpest, even), its shot (shots) or, with exact positions, from "
+                            "its frame to the next panel's (videos: panels[].clip_s). \"animatic\": the "
                             "panels one after another as still cards, each on screen for its duration, with its "
                             "number, caption and notes, and a cut, fade or dissolve between them; with images, a "
                             'timed slideshow. "auto" (default): mosaic for video, animatic for images.')
@@ -651,7 +654,8 @@ class AnimationSpec(Model):
                            "a fade or dissolve fades to black, but in gif and webp a dissolve goes back into the "
                            "first panel, so the loop has no jump.")
     fade_s: float = Field(0.5, gt=0, le=5, description="Animatic: length of each fade or dissolve, s (never more "
-                                                       "than half a panel). Transitions do not lengthen the video: "
+                                                       "than half a panel); a fade to black between two panels is "
+                                                       "fade_s out and fade_s in. Transitions do not lengthen the video: "
                                                        "a dissolve is centred on the change and a fade takes the end "
                                                        "of one panel and the start of the next, so the total is the "
                                                        'sum of the durations. In select mode "shots" the detected '
@@ -687,8 +691,9 @@ class StoryboardOutput(Model):
                                 '"excel_es": for Excel in Spanish (and other languages with decimal commas): '
                                 "semicolon separator, decimal commas, Spanish column names and transitions (the "
                                 "words of the captions: corte, encadenado, fundido a negro...), no always-empty columns, and panel numbers kept as text (3.1 is not "
-                                "turned into a date). Columns: n, number, page, frame, time_s, timecode, pct (the "
-                                "panel's frame), shot_in_s, shot_out_s, shot_first_frame, shot_last_frame, "
+                                "turned into a date). Columns: n, number, page, frame, time_s, timecode, pct (these "
+                                "four are the panel's frame, not the shot's start), shot_in_s, shot_out_s, "
+                                "shot_first_frame, shot_last_frame, "
                                 "transition_in(_s), transition_out(_s) (mode \"shots\"), image, name, the notes, "
                                 "sharpness, colors, file, size, source. duration_s: the planned one, or the shot's.")
     frames: bool = Field(False, description="Also save each panel's picture at full size in <dir>/<name>_frames/ "
@@ -892,7 +897,7 @@ class VideoResult(Model):
     samples: str = Field(description="PNG with sample frames of the video and their times: open it to see what the "
                                      "video looks like.")
     sample_times_s: list[float] = Field(description="Times of those frames in the video, s (animatic: the middle "
-                                                    "of every panel and of every transition).")
+                                                    "of every panel and of every transition, at most 16).")
     scale: float | None = Field(None, description="Animatic: factor applied to every duration and transition to "
                                                   "fit animation.duration_s (1 = as given).")
 

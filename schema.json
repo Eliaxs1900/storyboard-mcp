@@ -362,11 +362,11 @@
     "$defs": {
      "AnimationSpec": {
       "additionalProperties": false,
-      "description": "Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an\nimage of sample frames and the JSON are always written too: they are what an assistant can look at.\nAn animatic shows one card at a time: the panel drawn as in layout.template (header, number and\ncaption, picture, its notes whenever panels[] has notes, with any template, and footer), as big as\nmax_side allows; with layout.page \"16:9\" (or \"A4\", \"Letter\") the card, and the video, have that\nshape (the panel is scaled to fit with its caption and notes). A clean 16:9 slideshow, only the\npictures: layout {\"page\": \"16:9\", \"header\": false, \"footer\": false, \"label\": {\"show\": false}} and\nanimation {\"progress\": false}; add layout \"aspect\": \"16:9\" and \"fit\": \"cover\" to fill the frame\nwithout bands (cropping pictures of another shape).",
+      "description": "Animated output: used when output.format is mp4, webm, gif or webp. The still pages (PNG), an\nimage of sample frames and the JSON are always written too: they are what an assistant can look at.\nAn animatic shows one card at a time: the panel drawn as in layout.template (header, number and\ncaption, picture, its notes whenever panels[] has notes, with any template, and footer), as big as\nmax_side allows, so by default its shape follows the template and the notes (it is not 16:9);\nwith layout.page \"16:9\" (or \"A4\", \"Letter\") the card, and the video, have that shape (the panel\nis scaled to fit with its caption and notes). A clean 16:9 slideshow, only the\npictures: layout {\"page\": \"16:9\", \"header\": false, \"footer\": false, \"label\": {\"show\": false}} and\nanimation {\"progress\": false}; add layout \"aspect\": \"16:9\" and \"fit\": \"cover\" to fill the frame\nwithout bands (cropping pictures of another shape).",
       "properties": {
        "kind": {
         "default": "auto",
-        "description": "\"mosaic\" (video input): the page itself, with every panel playing its part of the video in a loop, all at once, and a progress bar under each panel. \"animatic\": the panels one after another as still cards, each on screen for its duration, with its number, caption and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. \"auto\" (default): mosaic for video, animatic for images.",
+        "description": "\"mosaic\" (video input): the page itself, with every panel playing its part of the video in a loop, all at once, and a progress bar under each panel; that part is its stretch (select modes sharpest, even), its shot (shots) or, with exact positions, from its frame to the next panel's (videos: panels[].clip_s). \"animatic\": the panels one after another as still cards, each on screen for its duration, with its number, caption and notes, and a cut, fade or dissolve between them; with images, a timed slideshow. \"auto\" (default): mosaic for video, animatic for images.",
         "enum": [
          "auto",
          "mosaic",
@@ -414,7 +414,7 @@
        },
        "fade_s": {
         "default": 0.5,
-        "description": "Animatic: length of each fade or dissolve, s (never more than half a panel). Transitions do not lengthen the video: a dissolve is centred on the change and a fade takes the end of one panel and the start of the next, so the total is the sum of the durations. In select mode \"shots\" the detected lengths are used instead.",
+        "description": "Animatic: length of each fade or dissolve, s (never more than half a panel); a fade to black between two panels is fade_s out and fade_s in. Transitions do not lengthen the video: a dissolve is centred on the change and a fade takes the end of one panel and the start of the next, so the total is the sum of the durations. In select mode \"shots\" the detected lengths are used instead.",
         "exclusiveMinimum": 0,
         "maximum": 5,
         "type": "number"
@@ -1469,7 +1469,7 @@
        },
        "csv_style": {
         "default": "standard",
-        "description": "\"standard\": comma separator, dot decimals, English column names, every column. \"excel_es\": for Excel in Spanish (and other languages with decimal commas): semicolon separator, decimal commas, Spanish column names and transitions (the words of the captions: corte, encadenado, fundido a negro...), no always-empty columns, and panel numbers kept as text (3.1 is not turned into a date). Columns: n, number, page, frame, time_s, timecode, pct (the panel's frame), shot_in_s, shot_out_s, shot_first_frame, shot_last_frame, transition_in(_s), transition_out(_s) (mode \"shots\"), image, name, the notes, sharpness, colors, file, size, source. duration_s: the planned one, or the shot's.",
+        "description": "\"standard\": comma separator, dot decimals, English column names, every column. \"excel_es\": for Excel in Spanish (and other languages with decimal commas): semicolon separator, decimal commas, Spanish column names and transitions (the words of the captions: corte, encadenado, fundido a negro...), no always-empty columns, and panel numbers kept as text (3.1 is not turned into a date). Columns: n, number, page, frame, time_s, timecode, pct (these four are the panel's frame, not the shot's start), shot_in_s, shot_out_s, shot_first_frame, shot_last_frame, transition_in(_s), transition_out(_s) (mode \"shots\"), image, name, the notes, sharpness, colors, file, size, source. duration_s: the planned one, or the shot's.",
         "enum": [
          "standard",
          "excel_es"
@@ -2745,7 +2745,7 @@
         "type": "string"
        },
        "sample_times_s": {
-        "description": "Times of those frames in the video, s (animatic: the middle of every panel and of every transition).",
+        "description": "Times of those frames in the video, s (animatic: the middle of every panel and of every transition, at most 16).",
         "items": {
          "type": "number"
         },
