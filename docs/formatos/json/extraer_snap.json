@@ -57,5 +57,7 @@
    "codec": "mpeg4"
   }
  },
- "warnings": []
+ "warnings": [
+  "select.snap_s: 1 position(s) were on blurred frames and moved to the nearest sharp one: 3.00 → 2.97 s"
+ ]
 }

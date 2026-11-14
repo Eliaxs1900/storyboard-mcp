@@ -614,7 +614,7 @@ def main() -> None:
                                               "layout": {"panel_width": 320, "columns": 3},
                                               "output": out("mosaico_readme", format="webp", quality=60,
                                                             animation={"max_side": 640, "fps": 8})})
-    run("animatica", "make_storyboard", {"input": {"video": V}, "select": {"at_s": [2.5, 9.5, 15.5]},
+    run("animatica", "make_storyboard", {"input": {"video": V}, "select": {"at_s": [2.5, 9.5, 15.5], "snap_s": 0.5},
                                          "panels": [{"shot": "PG", "action": "Amanece sobre la ciudad.",
                                                      "duration_s": 2.5, "transition": "encadenado"},
                                                     {"shot": "PM", "dialogue": "ANA: Llego tarde.", "duration_s": 2,
@@ -673,8 +673,8 @@ def figures(minimo: dict) -> None:
         ("Posiciones exactas", S / "sel_exacto.png", ['"step_pct": 20'],
          "0, 20, 40, 60, 80 y 100 %: exactas, sin decodificar todo el vídeo. También at_pct, at_s, at_frames, "
          "step_s."),
-        ("Exactas, el más nítido cerca", S / "sel_exacto_snap.png", ['"step_pct": 20, "snap_s": 0.5'],
-         "En cada posición, el más nítido a ± 0,5 s."),
+        ("Exactas, pero sin movidos", S / "sel_exacto_snap.png", ['"step_pct": 20, "snap_s": 0.5'],
+         "Si una posición cae en un fotograma movido, el nítido más cercano (a ± 0,5 s como mucho)."),
     ], OUT / "fig_seleccion.png")
     rows_figure("Filtros: sin movidos ni repetidos",
                 "Lo que quitan los filtros sale en «dropped» del JSON y el umbral, en «selection.threshold».", [
@@ -755,7 +755,7 @@ def figures(minimo: dict) -> None:
               f"{f['time_s']} s, {f['pct']} %.") for f in ex]
     items.append((Path(sn["file"]).name, S / "extraer_snap" / Path(sn["file"]).name, ['"at_frames": [90],',
                                                                                      '"snap_s": 0.5'],
-                  f"Se pidió el 90 (movido): da el {sn['frame']}, el más nítido a ± 0,5 s."))
+                  f"Se pidió el 90 (movido): da el {sn['frame']}, el nítido más cercano."))
     grid_figure("extract_frames: fotogramas a tamaño completo",
                 'Con "at_pct": [0, 50, 100] y, en el último, la búsqueda del más nítido. Cada uno se guarda '
                 "como f<número de 5 cifras>.jpg (640×360 aquí).", items, OUT / "fig_extract_frames.png", cols=4)

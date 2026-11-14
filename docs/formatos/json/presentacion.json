@@ -28,15 +28,20 @@
    "fps": 12,
    "frames": 96,
    "duration_s": 8.0,
-   "bytes": 671872,
+   "bytes": 672870,
    "loop": true,
    "samples": "/Users/ana/ejemplos/presentacion_samples.png",
    "sample_times_s": [
     1.0,
+    2.0,
     3.0,
+    4.0,
     5.0,
-    7.0
-   ]
+    6.0,
+    7.0,
+    7.58
+   ],
+   "scale": 1.0
   }
  ],
  "panels": [
@@ -53,7 +58,9 @@
    "video_s": [
     0.0,
     2.0
-   ]
+   ],
+   "video_transition": "dissolve",
+   "video_transition_s": 0.8
   },
   {
    "n": 2,
@@ -68,7 +75,9 @@
    "video_s": [
     2.0,
     4.0
-   ]
+   ],
+   "video_transition": "dissolve",
+   "video_transition_s": 0.8
   },
   {
    "n": 3,
@@ -83,7 +92,9 @@
    "video_s": [
     4.0,
     6.0
-   ]
+   ],
+   "video_transition": "dissolve",
+   "video_transition_s": 0.8
   },
   {
    "n": 4,
@@ -98,7 +109,9 @@
    "video_s": [
     6.0,
     8.0
-   ]
+   ],
+   "video_transition": "dissolve",
+   "video_transition_s": 0.8
   }
  ],
  "dropped": [],

@@ -36,11 +36,17 @@
    "sample_times_s": [
     1.5,
     4.5,
+    6.0,
     8.08,
+    9.92,
+    10.42,
     12.08,
     15.08,
-    17.58
-   ]
+    16.17,
+    17.58,
+    18.5
+   ],
+   "scale": 1.0
   }
  ],
  "panels": [
@@ -66,7 +72,8 @@
    "video_s": [
     0.0,
     3.0
-   ]
+   ],
+   "video_transition": "cut"
   },
   {
    "n": 2,
@@ -91,7 +98,9 @@
    "video_s": [
     3.0,
     6.0
-   ]
+   ],
+   "video_transition": "dissolve",
+   "video_transition_s": 1.0
   },
   {
    "n": 3,
@@ -117,7 +126,9 @@
    "video_s": [
     6.0,
     10.233
-   ]
+   ],
+   "video_transition": "fade",
+   "video_transition_s": 1.0
   },
   {
    "n": 4,
@@ -142,7 +153,8 @@
    "video_s": [
     10.233,
     14.0
-   ]
+   ],
+   "video_transition": "cut"
   },
   {
    "n": 5,
@@ -167,7 +179,9 @@
    "video_s": [
     14.0,
     16.2
-   ]
+   ],
+   "video_transition": "dissolve",
+   "video_transition_s": 0.5
   },
   {
    "n": 6,
@@ -193,7 +207,9 @@
    "video_s": [
     16.2,
     19.0
-   ]
+   ],
+   "video_transition": "fade",
+   "video_transition_s": 1.0
   }
  ],
  "dropped": [],

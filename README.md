@@ -50,6 +50,8 @@ Con `claude mcp list` deberías ver `storyboard: … ✔ Connected`. Para Claude
 | «Hazme un GIF en el que se mueva cada viñeta» | `… "select": {"count": 6}, "output": {"format": "gif"}` |
 | «Una animática del storyboard, con un fundido al final» | `… "panels": [{"duration_s": 3}, …, {"transition": "fundido a negro"}], "output": {"format": "mp4", "animation": {"kind": "animatic"}}` |
 | «Los colores de cada plano» | `… "select": {"mode": "shots"}, "output": {"color_script": true}` |
+| «Una presentación de estas fotos, 3 s cada una, con encadenados» | `make_storyboard {"input": {"folder": "/…/fotos"}, "output": {"format": "webp", "animation": {"panel_s": 3, "transition": "dissolve"}}}` |
+| «Repite el montaje del vídeo en 10 segundos» | `… "select": {"mode": "shots"}, "output": {"format": "mp4", "animation": {"kind": "animatic", "duration_s": 10}}` |
 | «Copia las 3 mejores fotos de la ráfaga» | `extract_frames {"input": {"folder": "/…/rafaga"}, "select": {"mode": "best", "count": 3}, "output": {"dir": "/…/mejores"}}` |
 | «El fotograma del minuto 5, el más nítido de alrededor, en grande» | `extract_frames {"input": {"video": "/…"}, "select": {"at_s": [300], "snap_s": 0.5}}` |
 
@@ -86,7 +88,7 @@ Con `input.images` (una lista) o `input.folder` (una carpeta) se hace lo mismo, 
 
 ### Planos
 
-Con `"select": {"mode": "shots"}` sale una viñeta por plano. Cada una lleva en el JSON `shot_in_s`, `shot_out_s`, `duration_s` y cómo empieza y acaba el plano (`cut`, `fade_in` / `fade_out` o `dissolve`), y la lista de planos los guarda también:
+Con `"select": {"mode": "shots"}` sale una viñeta por plano. Cada una lleva en el JSON `shot_in_s`, `shot_out_s`, `duration_s` y cómo empieza y acaba el plano (`start`, `cut`, `fade_in` / `fade_out`, `dissolve` o `end`), y la lista de planos los guarda también:
 
 ![Planos de un vídeo](docs/formatos/fig_planos.png)
 
@@ -109,7 +111,7 @@ Todas las herramientas reciben las mismas secciones. **Solo `input` es obligator
 | `panels` | Notas por viñeta, en orden (o con posición propia) | `shot`, `camera`, `action`, `dialogue`, `sound`, `transition`, `duration_s`, `number`; posición: `frame`, `at_s`, `at_pct`, `image`, `image_name` |
 | `layout` | Cómo se colocan | `template` (`grid`) · `columns` (grid 4, storyboard 3) · `rows` · `page` (`auto`, `A4`, `Letter`, `16:9`) · `orientation` · `panel_width` (480) · `aspect` (`source`) · `fit` · `margin`, `gap`, `padding` · `header`, `title`, `subtitle`, `footer`, `footer_text` · `label`, `numbering`, `notes`, `guides` · `language` (`es`, `en`) |
 | `style` | Colores, fuentes y tamaños | `theme` (`dark`: fondo `#000000`; `light`: `#ffffff`) · `background`, `text`, `text_secondary`, `accent`, `label_background`, `label_text`, `panel_border`, `border_width`, `notes_background`, `notes_text`, `notes_rule`, `guides` · `font`, `font_bold` · `title_size`, `text_size`, `label_size`, `number_size`, `notes_size` · `sharpen` (0.5) |
-| `output` | Dónde y cómo se guarda | `dir` (temporal) · `name` (`<entrada>_<plantilla>`) · `format` (`png`, `jpg`, `pdf`, y animados: `mp4`, `webm`, `gif`, `webp`) · `animation`: `kind` (`mosaic`, `animatic`), `fps` (12), `duration_s`, `panel_s` (2), `transition` (`cut`), `fade_s` (0,5), `max_side`, `progress` · `quality` (90) · `dpi` (150) · `shot_list` (`["json", "csv"]`) · `csv_style` (`standard`; `excel_es` para Excel en español) · `frames` · `also_without_labels` · `color_script` (false) y `color_count` (5) · `preview` (true). En `extract_frames`: `dir`, `format` y `names` (`numbered` o `original`) |
+| `output` | Dónde y cómo se guarda | `dir` (temporal) · `name` (`<entrada>_<plantilla>`) · `format` (`png`, `jpg`, `pdf`, y animados: `mp4`, `webm`, `gif`, `webp`) · `animation`: `kind` (`mosaic`, `animatic`), `fps` (12), `duration_s`, `panel_s` (2), `transition` (`cut`), `fade_s` (0,5), `max_side`, `progress` · `quality` (90) · `dpi` (150) · `shot_list` (ninguna; p. ej. `["json", "csv"]`) · `csv_style` (`standard`; `excel_es` para Excel en español) · `frames` · `also_without_labels` · `color_script` (false) y `color_count` (5) · `preview` (true). En `extract_frames`: `dir`, `format` y `names` (`numbered` o `original`) |
 
 - **Posiciones:** los fotogramas van de 0 a `frames − 1`. Los segundos cuentan desde el primer fotograma (0,0 s). En %, 0 es el primer fotograma o la primera imagen y 100 el último. Las imágenes se indican por índice (0…) o por nombre de archivo.
 - **Colores:** `#RRGGBB`, `#RRGGBBAA` (con transparencia), `#RGB`, `#RGBA` o un nombre CSS (`"white"`). Los valores de lista (`"PDF"`, `"a4"`, `"Storyboard"`) valen en mayúsculas o minúsculas.
