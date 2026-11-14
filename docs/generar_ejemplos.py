@@ -15,14 +15,20 @@
      móvil, dos movidas y una casi repetida).
    - movil.mp4: 3 s grabados «en vertical» como un móvil: la imagen guardada de lado y un
      giro de 90° en la matriz de visualización.
+   - planos.mp4: 640×360, 30 fps, 17 s con 6 planos y transiciones conocidas: corte a 3 s,
+     encadenado de 1 s, fundido a negro y vuelta, corte, encadenado de 0,5 s y fundido final.
+     Cada fotograma lleva su número, su tiempo y su plano.
 2. Llama a las herramientas de server.py con run_tool(), igual que un asistente por MCP.
    Las respuestas se guardan en docs/formatos/json/, con las rutas cambiadas por
    /Users/ana/ejemplos/ (son rutas de ejemplo).
-3. Monta con esas salidas reales las figuras docs/formatos/fig_*.png.
+3. Monta con esas salidas reales las figuras docs/formatos/fig_*.png. De los vídeos (mosaico,
+   animática, presentación) enseña fotogramas sacados del archivo que se escribió; un mosaico
+   pequeño en WebP animado se copia a docs/formatos/mosaico.webp para el README.
 """
 import colorsys
 import importlib.util
 import json
+import math
 import os
 import random
 import shutil
@@ -142,6 +148,107 @@ def make_phone_video(path: Path) -> None:
             d.rounded_rectangle((90, 540, 270, 610), radius=14, fill=(12, 12, 16))
             d.text((180, 575), f"#{i}", font=font(44, bold=True, mono=True), fill=(253, 224, 71), anchor="mm")
             for pkt in st.encode(av.VideoFrame.from_image(im.transpose(Image.Transpose.ROTATE_90))):
+                c.mux(pkt)
+        for pkt in st.encode():
+            c.mux(pkt)
+
+
+# Planos de planos.mp4 y transiciones entre ellos: ("cut",), ("dissolve", s) o ("fade", salida, negro, entrada)
+SHOTS = [("ciudad", 3.0), ("cut",), ("mar", 2.5), ("dissolve", 1.0), ("sala", 3.0), ("fade", 0.5, 0.5, 0.5),
+         ("bosque", 3.0), ("cut",), ("noche", 2.0), ("dissolve", 0.5), ("fin", 2.5)]
+END_FADE = 1.0
+
+
+def shot_scene(kind: str, t: float) -> Image.Image:
+    im = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(im)
+    if kind == "ciudad":                                     # la ciudad del otro vídeo, de día
+        for y in range(H):
+            d.line((0, y, W, y), fill=_mix((37, 99, 235), (191, 219, 254), y / H))
+        off = round(t * SCROLL)
+        for x, w, h, tone, wins in CITY:
+            if -w <= x - off <= W:
+                d.rectangle((x - off, H - h, x - off + w, H), fill=[(30, 41, 59), (51, 65, 85), (15, 23, 42)][tone])
+    elif kind == "mar":
+        for y in range(H):
+            d.line((0, y, W, y), fill=(10, round(60 + 100 * y / H), round(120 + 120 * y / H)))
+        for k in range(9):
+            yy = H * (0.38 + 0.07 * k)
+            d.line([(x, yy + 7 * math.sin(x / 28 + t * 3 + k)) for x in range(0, W + 10, 10)],
+                   fill=(200, 230, 255), width=3)
+    elif kind == "sala":
+        d.rectangle((0, 0, W, H), fill=(150, 90, 50))
+        d.rectangle((0, H * 0.7, W, H), fill=(90, 50, 30))
+        d.rectangle((W * 0.1, H * 0.15, W * 0.35, H * 0.5), fill=(230, 220, 180))
+        bx = W * (0.25 + 0.5 * t / 3)
+        d.ellipse((bx - 30, H * 0.55, bx + 30, H * 0.55 + 60), fill=(200, 30, 30))
+    elif kind == "bosque":                                   # paneo rápido
+        d.rectangle((0, 0, W, H), fill=(30, 80, 40))
+        rng = random.Random(5)
+        for _ in range(60):
+            x = (rng.randint(0, 3 * W) - round(t * W * 0.5)) % (3 * W) - W
+            d.rectangle((x, 0, x + rng.randint(8, 34), H), fill=(rng.randint(60, 110), rng.randint(40, 70), 20))
+    elif kind == "noche":
+        d.rectangle((0, 0, W, H), fill=(8, 10, 25))
+        rng = random.Random(9)
+        for _ in range(60):
+            d.point((rng.randint(0, W), rng.randint(0, H // 2)), fill=(200, 200, 220))
+        lx = W * (0.3 + 0.4 * math.sin(t))
+        d.ellipse((lx - 34, H * 0.25, lx + 34, H * 0.25 + 68), fill=(255, 230, 150))
+    else:                                                    # rótulo final
+        d.text((W / 2, H / 2), "FIN", font=font(96, bold=True), fill=(255, 255, 255), anchor="mm")
+    return im
+
+
+def _stamp(im: Image.Image, i: int, shot: int) -> Image.Image:
+    card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    c = ImageDraw.Draw(card)
+    c.rounded_rectangle((16, H - 84, 300, H - 16), radius=12, fill=(12, 12, 16, 220))   # abajo: la etiqueta va arriba
+    c.text((30, H - 76), f"#{i} · {i / FPS:.2f} s", font=font(26, bold=True, mono=True), fill=(255, 255, 255))
+    c.text((30, H - 42), f"PLANO {shot}", font=font(18, bold=True), fill=(253, 224, 71))
+    return Image.alpha_composite(im.convert("RGBA"), card).convert("RGB")
+
+
+def shots_timeline() -> list:
+    """Una entrada por fotograma: qué plano o mezcla de planos se ve, y con qué peso."""
+    scenes, trans = SHOTS[0::2], SHOTS[1::2]
+    frames: list = []
+    t0 = 0.0                                                 # tiempo de la escena al empezar sus fotogramas
+    for k, (kind, dur) in enumerate(scenes):
+        own = round(dur * FPS)
+        frames += [[(k, t0 + j / FPS, 1.0)] for j in range(own)]
+        end, t0 = t0 + own / FPS, 0.0
+        tr = trans[k] if k < len(trans) else None
+        if tr and tr[0] == "dissolve":
+            m = round(tr[1] * FPS)
+            frames += [[(k, end + j / FPS, 1 - (j + 0.5) / m), (k + 1, j / FPS, (j + 0.5) / m)] for j in range(m)]
+            t0 = m / FPS
+        elif tr and tr[0] == "fade":
+            o, b, n = (round(x * FPS) for x in tr[1:])
+            frames += [[(k, end + j / FPS, 1 - (j + 1) / o)] for j in range(o)] + [[]] * b
+            frames += [[(k + 1, j / FPS, (j + 1) / n)] for j in range(n)]
+            t0 = n / FPS
+    n_end = round(END_FADE * FPS)
+    for j in range(n_end):
+        frames[-n_end + j] = [(k, t, w * (1 - (j + 1) / n_end)) for k, t, w in frames[-n_end + j]]
+    return frames
+
+
+def make_shots_video(path: Path) -> None:
+    kinds = [s[0] for s in SHOTS[0::2]]
+    with av.open(str(path), "w") as c:
+        st = c.add_stream("mpeg4", rate=FPS)
+        st.width, st.height, st.pix_fmt, st.bit_rate = W, H, "yuv420p", 3_000_000
+        black = Image.new("RGB", (W, H))
+        for i, parts in enumerate(shots_timeline()):
+            pics = [(_stamp(shot_scene(kinds[k], max(0.0, t)), i, k + 1), w) for k, t, w in parts]
+            if not pics:                                      # negro entre dos fundidos
+                im = black
+            elif len(pics) == 1:                              # un plano, quizá fundiéndose con el negro
+                im = Image.blend(black, pics[0][0], pics[0][1])
+            else:                                             # encadenado: mezcla de los dos
+                im = Image.blend(pics[0][0], pics[1][0], pics[1][1])
+            for pkt in st.encode(av.VideoFrame.from_image(im)):
                 c.mux(pkt)
         for pkt in st.encode():
             c.mux(pkt)
@@ -491,12 +598,49 @@ def main() -> None:
                                            "output": {"dir": f"{O}/extraer_snap"}})
     run("extraer_fotos", "extract_frames", {"input": {"folder": F}, "select": {"mode": "sharpest", "count": 3},
                                             "output": {"dir": f"{O}/extraer_fotos"}})
+    # planos, vídeo y guion de color
+    shots = WORK / "planos.mp4"
+    if not shots.exists():
+        print("creando planos.mp4 …")
+        make_shots_video(shots)
+    P = str(shots)
+    planos = run("planos", "make_storyboard", {"input": {"video": P}, "select": {"mode": "shots"},
+                                               "layout": {"panel_width": 320, "columns": 3},
+                                               "output": out("planos", shot_list=["json", "csv"], color_script=True)})
+    run("mosaico", "make_storyboard", {"input": {"video": V}, "select": {"count": 6},
+                                       "layout": {"panel_width": 320, "columns": 3},
+                                       "output": out("mosaico", format="gif")})
+    run("mosaico_readme", "make_storyboard", {"input": {"video": V}, "select": {"count": 6},
+                                              "layout": {"panel_width": 320, "columns": 3},
+                                              "output": out("mosaico_readme", format="webp", quality=60,
+                                                            animation={"max_side": 640, "fps": 8})})
+    run("animatica", "make_storyboard", {"input": {"video": V}, "select": {"at_s": [2.5, 9.5, 15.5]},
+                                         "panels": [{"shot": "PG", "action": "Amanece sobre la ciudad.",
+                                                     "duration_s": 2.5, "transition": "encadenado"},
+                                                    {"shot": "PM", "dialogue": "ANA: Llego tarde.", "duration_s": 2,
+                                                     "transition": "fundido a negro"},
+                                                    {"shot": "PP", "action": "Mira el reloj.", "duration_s": 2.5}],
+                                         "layout": {"template": "storyboard"},
+                                         "output": out("animatica", format="mp4",
+                                                       animation={"kind": "animatic", "max_side": 1280,
+                                                                  "fade_s": 0.6})})
+    run("animatica_planos", "make_storyboard", {"input": {"video": P}, "select": {"mode": "shots"},
+                                                "layout": {"label": {"fields": ["number", "shot_in", "duration",
+                                                                                "transition"]}},
+                                                "output": out("animatica_planos", format="mp4",
+                                                              animation={"kind": "animatic", "max_side": 1280})})
+    run("presentacion", "make_storyboard", {"input": {"folder": F}, "select": {"mode": "best", "count": 4},
+                                            "output": out("presentacion", format="webp",
+                                                          animation={"panel_s": 2, "transition": "dissolve",
+                                                                     "fade_s": 0.8})})
     print("figuras:")
     figures(minimo)
+    video_figures(planos)
 
 
 def figures(minimo: dict) -> None:
     S = WORK
+    video_frames(S / "mosaico.gif", [1.0])[0].save(S / "mosaico_frame.png")
     anatomy_figure(S / "minimo.png", minimo, OUT / "fig_minimo.png")
     rows_figure("Plantillas de página (layout.template)",
                 "Las mismas entradas con las cuatro plantillas. Las notas salen de panels[] (una por viñeta, en "
@@ -594,6 +738,11 @@ def figures(minimo: dict) -> None:
                                                                      ' "select": {"mode": "best",',
                                                                      '   "count": 4}}'],
          "Las más nítidas y sin repetir. Con extract_frames se copian tal cual a otra carpeta."),
+        ("«Divide el vídeo en planos»", S / "planos.png", ['"select": {"mode": "shots"}'],
+         "Una viñeta por plano, con su entrada, su duración y si acaba en corte, fundido o encadenado."),
+        ("«Hazme un GIF que se mueva»", S / "mosaico_frame.png", ['"output": {"format": "gif"}'],
+         "La misma hoja con cada viñeta reproduciendo su tramo (aquí, un fotograma del GIF). También mp4, "
+         "webm, webp y la animática."),
     ], OUT / "fig_usos.png")
     pages = sorted(S.glob("pdf_png_p*.png"))
     grid_figure("PDF de varias páginas y lista de planos",
@@ -610,6 +759,183 @@ def figures(minimo: dict) -> None:
     grid_figure("extract_frames: fotogramas a tamaño completo",
                 'Con "at_pct": [0, 50, 100] y, en el último, la búsqueda del más nítido. Cada uno se guarda '
                 "como f<número de 5 cifras>.jpg (640×360 aquí).", items, OUT / "fig_extract_frames.png", cols=4)
+
+
+def video_frames(path: Path, times: list[float]) -> list[Image.Image]:
+    """Los fotogramas del vídeo escrito más cercanos a esos tiempos (decodificados del archivo)."""
+    with av.open(str(path)) as c:
+        frames = [(float(f.pts * f.time_base), f.to_image().convert("RGB")) for f in c.decode(video=0)]
+    return [min(frames, key=lambda x: abs(x[0] - t))[1] for t in times]
+
+
+def filmstrip_figure(title: str, subtitle: str, rows: list, out: Path) -> None:
+    """Una fila por vídeo: título, sus fotogramas reales en fila con su tiempo, y la llamada."""
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    blocks = []
+    for head, frames, code, text in rows:
+        n = len(frames)
+        fw = (FIG_W - 2 * PAD - 14 * (n - 1)) // n
+        ims = [im.resize((fw, round(im.height * fw / im.width)), Image.LANCZOS) for im, _ in frames]
+        th = max(im.height for im in ims)
+        caps = [wrap(probe, cap, F_TEXT, fw) for _, cap in frames]
+        cap_h = 30 * max(len(c) for c in caps)
+        blocks.append((head, ims, caps, fw, th, cap_h, code, text,
+                       side_text(probe, 0, 0, FIG_W - 2 * PAD, code, text, False)))
+    head_h = heading(probe, title, subtitle)
+    total = head_h + sum(44 + b[4] + 10 + b[5] + 16 + b[8] + GAP for b in blocks) + PAD - GAP
+    fig = Image.new("RGB", (FIG_W, total), PAPER)
+    d = ImageDraw.Draw(fig)
+    y = heading(d, title, subtitle)
+    for n, (head, ims, caps, fw, th, cap_h, code, text, st) in enumerate(blocks, 1):
+        badge(d, PAD + 17, y + 15, n)
+        d.text((PAD + 46, y + 15), head, font=F_HEAD, fill=INK, anchor="lm")
+        y += 44
+        for k, (im, cap) in enumerate(zip(ims, caps)):
+            x = PAD + k * (fw + 14)
+            fig.paste(im, (x, y))
+            d.rectangle((x - 1, y - 1, x + im.width, y + im.height), outline=RULE)
+            for j, ln in enumerate(cap):
+                d.text((x, y + th + 10 + 30 * j), ln, font=F_TEXT, fill=MUTED)
+        y += th + 10 + cap_h + 16
+        side_text(d, PAD, y, FIG_W - 2 * PAD, code, text)
+        y += st + GAP
+        if n < len(blocks):
+            d.line((PAD, y - GAP // 2, FIG_W - PAD, y - GAP // 2), fill=RULE, width=2)
+    save_fig(fig, out)
+
+
+TRANS_ES = {"cut": "corte", "dissolve": "encadenado", "fade_out": "fundido a negro", "fade_in": "desde negro",
+            "start": "inicio", "end": "fin"}
+
+
+def shots_figure(data: dict, out: Path) -> None:
+    """La hoja real de planos y, debajo, la línea de tiempo que dibuja su JSON: cada plano con su
+    color dominante, su entrada y su duración, y cada transición con su tipo y su largo."""
+    sheet = fit(WORK / "planos.png", FIG_W - 2 * PAD)
+    panels = data["panels"]
+    end = panels[-1]["shot_out_s"]
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    title = "Planos: un fotograma por plano, con sus cortes, fundidos y encadenados"
+    sub = ('make_storyboard con "select": {"mode": "shots"} sobre planos.mp4 (6 planos). Debajo, la línea de tiempo '
+           "dibujada con el JSON de la respuesta: shot_in_s, shot_out_s, transition_in / transition_out y su largo.")
+    p3 = panels[2]
+    code = [f'"panels": [ …, {{"n": 3, "frame": {p3["frame"]}, "shot_in_s": {p3["shot_in_s"]}, '
+            f'"shot_out_s": {p3["shot_out_s"]}, "duration_s": {p3["duration_s"]},',
+            f'  "shot_frames": {p3["shot_frames"]}, "transition_in": "{p3["transition_in"]}", '
+            f'"transition_in_s": {p3.get("transition_in_s")},',
+            f'  "transition_out": "{p3["transition_out"]}", "transition_out_s": {p3.get("transition_out_s")}}}, …]']
+    text = ("Cada viñeta es el fotograma más nítido de su plano, fuera de las transiciones. Los planos van seguidos: "
+            "shot_out_s de uno es shot_in_s del siguiente. Un encadenado se reparte entre los dos planos; en un "
+            "fundido a negro, el corte se pone en medio del negro.")
+    head = heading(probe, title, sub)
+    bar_y, bar_h = head + sheet.height + 70, 54
+    st = side_text(probe, 0, 0, FIG_W - 2 * PAD, code, text, False)
+    fig = Image.new("RGB", (FIG_W, bar_y + bar_h + 96 + st + PAD), PAPER)
+    d = ImageDraw.Draw(fig)
+    heading(d, title, sub)
+    fig.paste(sheet, (PAD, head))
+    d.rectangle((PAD - 1, head - 1, PAD + sheet.width, head + sheet.height), outline=RULE)
+    x_of = lambda t: PAD + (FIG_W - 2 * PAD) * t / end                     # noqa: E731
+    for p in panels:
+        col = p["colors"][0]["hex"] if p.get("colors") else "#888888"
+        x0, x1 = x_of(p["shot_in_s"]), x_of(p["shot_out_s"])
+        d.rectangle((x0, bar_y, x1, bar_y + bar_h), fill=col)
+        d.text(((x0 + x1) / 2, bar_y + bar_h / 2), str(p["n"]), font=F_HEAD, fill=PAPER, anchor="mm",
+               stroke_width=3, stroke_fill=INK)
+        d.text((x0 + 4, bar_y + bar_h + 8), f'{p["shot_in_s"]:g} s', font=F_CODE, fill=MUTED)
+        for side, kind, length in (("in", p["transition_in"], p.get("transition_in_s")),
+                                   ("out", p["transition_out"], p.get("transition_out_s"))):
+            if length:                                     # gradual: a band over the transition
+                a, b = (x0, x_of(p["shot_in_s"] + length / 2 if kind == "dissolve" else p["shot_in_s"] + length)) \
+                    if side == "in" else (x_of(p["shot_out_s"] - (length / 2 if kind == "dissolve" else length)), x1)
+                band = Image.new("RGBA", (max(1, round(b - a)), bar_h), (0, 0, 0, 0))
+                bd = ImageDraw.Draw(band)
+                for k in range(-bar_h, band.width, 8):
+                    bd.line((k, bar_h, k + bar_h, 0), fill=(255, 255, 255, 170) if kind == "dissolve"
+                            else (0, 0, 0, 200), width=3)
+                fig.paste(band, (round(a), bar_y), band)
+        if p["transition_out"] != "end":
+            d.line((x1, bar_y - 10, x1, bar_y + bar_h + 4), fill=INK, width=3)
+            label = TRANS_ES[p["transition_out"]]
+            right = x1 + probe.textlength(label, font=F_CODE) / 2 > FIG_W - PAD
+            last = p is panels[-1]                          # el final del vídeo: una línea más arriba
+            d.text((x1, bar_y - (38 if last else 14)), label, font=F_CODE, fill=INK, anchor="rs" if right else "ms")
+    d.text((FIG_W - PAD, bar_y + bar_h + 8), f"{end:g} s", font=F_CODE, fill=MUTED, anchor="ra")
+    legend_y = bar_y + bar_h + 40
+    d.text((PAD, legend_y), "Rayas blancas: encadenado. Rayas negras: fundido a negro. Línea: el cambio de plano.",
+           font=F_TEXT, fill=MUTED)
+    side_text(d, PAD, legend_y + 44, FIG_W - 2 * PAD, code, text)
+    save_fig(fig, out)
+
+
+def video_figures(planos: dict) -> None:
+    S = WORK
+    shots_figure(planos, OUT / "fig_planos.png")
+    colores = json.loads((OUT / "json" / "planos.json").read_text())["panels"]
+    rows_figure("Guion de color (output.color_script)",
+                'Los colores dominantes de cada viñeta, en orden: <name>_colors.png y "colors" en el JSON de cada '
+                "viñeta (hex y % de la imagen, de más a menos).", [
+        ("planos.mp4, un plano por viñeta", S / "planos_colors.png",
+         ['"select": {"mode": "shots"},', '"output": {"color_script": true}', "",
+          f'"colors": [{{"hex": "{colores[1]["colors"][0]["hex"]}",',
+          f'  "pct": {colores[1]["colors"][0]["pct"]}}}, …]'],
+         "Cada columna: la imagen arriba (si cabe) y sus colores apilados según cuánto ocupan. color_count (5) "
+         "dice cuántos por viñeta. Con muchas viñetas, las columnas se estrechan y se quitan las imágenes."),
+    ], OUT / "fig_guion_color.png", img_w=760)
+    m = json.loads((OUT / "json" / "mosaico.json").read_text())
+    mv = m["videos"][0]
+    gif = S / "mosaico.gif"
+    times = [0.0, mv["duration_s"] / 2, mv["duration_s"] - 1 / mv["fps"]]
+    mframes = video_frames(gif, times)
+    shutil.copy(S / "mosaico_readme.webp", OUT / "mosaico.webp")         # animado, para el README
+    a = json.loads((OUT / "json" / "animatica.json").read_text())
+    av_ = a["videos"][0]
+    pv = [p["video_s"] for p in a["panels"]]
+    at = [sum(pv[0]) / 2, pv[0][1], pv[1][1] - 0.15, (pv[2][0] + pv[2][1]) / 2]
+    acap = ["viñeta 1", "encadenado: mitad y mitad", "fundido a negro", "viñeta 3"]
+    aframes = video_frames(S / "animatica.mp4", at)
+    b = json.loads((OUT / "json" / "animatica_planos.json").read_text())
+    bp = b["panels"]
+    bt = [(bp[0]["video_s"][0] + bp[0]["video_s"][1]) / 2, bp[1]["video_s"][1],
+          bp[2]["video_s"][1] - 0.1, bp[3]["video_s"][0] + 0.15, bp[4]["video_s"][1], bp[5]["video_s"][1] - 0.15]
+    bcap = ["plano 1", "encadenado del 2 al 3", "fundido a negro", "desde negro", "encadenado del 5 al 6",
+            "fundido final"]
+    bframes = video_frames(S / "animatica_planos.mp4", bt)
+    c = json.loads((OUT / "json" / "presentacion.json").read_text())
+    cp = [p["video_s"] for p in c["panels"]]
+    ct = [sum(cp[0]) / 2, cp[0][1], sum(cp[1]) / 2, cp[1][1], sum(cp[2]) / 2]
+    names = [p["name"] for p in c["panels"]]
+    ccap = [names[0], "encadenado", names[1], "encadenado", names[2]]
+    cframes = video_frames(S / "presentacion.webp", ct)
+    filmstrip_figure("Vídeo: mosaico animado y animática (mp4, webm, gif, webp)",
+                     "Fotogramas sacados de los archivos que escribió el servidor. Cada llamada escribe además la hoja "
+                     "fija (PNG), <name>_samples.png con fotogramas de muestra y el JSON: un asistente no puede "
+                     "ver un vídeo.", [
+        ("Mosaico (vídeo): la hoja con cada viñeta reproduciendo su tramo",
+         [(im, f"{t:.2f} s") for im, t in zip(mframes, times)],
+         ['"select": {"count": 6},', '"output": {"format": "gif"}'],
+         f"El tramo de cada viñeta en bucle, todas a la vez, con una barra de progreso (la marca blanca es el "
+         f"fotograma de la hoja). {mv['size'][0]}×{mv['size'][1]}, {mv['fps']} fps, {mv['duration_s']} s, "
+         "en bucle. El JSON da clip_s y speed de cada viñeta."),
+        ("Animática: las viñetas en secuencia, con su duración y su transición",
+         [(im, f"{t:.1f} s · {cap}") for im, t, cap in zip(aframes, at, acap)],
+         ['"panels": [{"duration_s": 2.5, "transition": "encadenado"}, {"duration_s": 2,',
+          '  "transition": "fundido a negro"}, …], "layout": {"template": "storyboard"},',
+          '"output": {"format": "mp4", "animation": {"kind": "animatic"}}'],
+         f"Cada viñeta se dibuja como en la plantilla, con su número, su etiqueta y sus notas. "
+         f"{av_['size'][0]}×{av_['size'][1]}, {av_['duration_s']} s. El JSON da video_s: cuándo sale cada viñeta."),
+        ("Animática de planos: repite el montaje del vídeo",
+         [(im, f"{t:.1f} s · {cap}") for im, t, cap in zip(bframes, bt, bcap)],
+         ['"select": {"mode": "shots"},', '"output": {"format": "mp4", "animation": {"kind": "animatic"}}'],
+         "Con mode \"shots\", cada plano dura lo mismo que en el vídeo y lleva el corte, el encadenado o el "
+         "fundido que se detectó."),
+        ("Con imágenes: una presentación temporizada",
+         [(im, f"{t:.1f} s · {cap}") for im, t, cap in zip(cframes, ct, ccap)],
+         ['"input": {"folder": ".../fotos"}, "select": {"mode": "best", "count": 4},',
+          '"output": {"format": "webp", "animation": {"panel_s": 2, "transition": "dissolve"}}'],
+         "Con imágenes, la salida animada es siempre una animática: cada foto dura panel_s segundos (o su "
+         "duration_s en panels[]), y aquí se encadena con la siguiente."),
+    ], OUT / "fig_video.png")
 
 
 if __name__ == "__main__":

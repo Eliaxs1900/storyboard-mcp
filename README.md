@@ -1,12 +1,15 @@
 # storyboard-mcp
 
-Servidor **MCP** (Model Context Protocol) que deja a un asistente como Claude **ver un vídeo o una serie de fotos**. Los convierte en **páginas de viñetas**: una hoja de contactos, un storyboard con notas, una lista o una tira, en PNG, JPG o un PDF de varias páginas. Por cada viñeta devuelve un JSON con su fotograma, su tiempo, su nitidez y sus notas.
+Servidor **MCP** (Model Context Protocol) que deja a un asistente como Claude **ver un vídeo o una serie de fotos**. Los convierte en **páginas de viñetas**: una hoja de contactos, un storyboard con notas, una lista o una tira, en PNG, JPG o un PDF de varias páginas. También los **separa en planos** y los vuelve a convertir en **vídeo** (un mosaico animado o una animática). Por cada viñeta devuelve un JSON con su fotograma, su tiempo, su nitidez y sus notas.
 
 ![Usos: lo que pides y lo que sale](docs/formatos/fig_usos.png)
 
 - **Entrada:** un vídeo, una lista de imágenes o una carpeta. Se elige **exactamente uno** de los tres.
 - **Elige bien los fotogramas:** el **más nítido** de cada tramo, los **N más nítidos** de todo el vídeo o la carpeta, posiciones **exactas** (en segundos, % o nº de fotograma) o las que digas tú viñeta a viñeta. También descarta los **movidos** y los **repetidos**.
 - **Storyboard:** cada viñeta puede llevar notas de plano, cámara, acción, diálogo, sonido, transición y duración. Admite numeración propia (5.1, 12A, SH001), guías de formato (2.39:1, 9:16…), zona segura y tercios. Saca **PDF** en A4, Carta o 16:9, y la **lista de planos** en JSON y CSV.
+- **Planos:** una viñeta por plano, con su entrada, su salida, su duración y si empieza y acaba en **corte**, **fundido** o **encadenado**.
+- **Vídeo de vídeos:** en MP4, WebM, GIF o WebP, la hoja con cada viñeta reproduciendo su tramo a la vez (**mosaico**) o las viñetas una tras otra con su duración, sus transiciones y sus textos (**animática**; con fotos, una presentación). Siempre acompañado de la hoja fija, de fotogramas de muestra y del JSON, porque el asistente no puede ver un vídeo.
+- **Guion de color:** los colores dominantes de cada viñeta, en una tira y en el JSON.
 - **Todo personalizable:** tema oscuro (negro puro) o claro (blanco puro) y cualquier color, fuente, tamaño o margen. Todo tiene un valor por defecto.
 - **Una estructura JSON común** para todas las herramientas, definida como JSON Schema ([`schema.json`](schema.json)). Un error en los argumentos dice **qué campo** falla, qué se esperaba y qué llegó.
 - Va en un único archivo, [`server.py`](server.py), y se ejecuta con [`uv`](https://docs.astral.sh/uv/), que instala las dependencias solo. **No hace falta ffmpeg:** decodifica con [PyAV](https://pyav.org).
@@ -43,6 +46,10 @@ Con `claude mcp list` deberías ver `storyboard: … ✔ Connected`. Para Claude
 | «Solo del minuto 2 al 3, sin repetidos» | `… "select": {"start_s": 120, "end_s": 180, "min_difference": 6}` |
 | «Un storyboard en PDF A4 con notas de cada plano» | `… "panels": [{"shot": "PG", "action": "…"}, …], "layout": {"template": "storyboard", "page": "A4"}, "output": {"format": "pdf"}` |
 | «Las fotos de esta carpeta, sin las movidas» | `make_storyboard {"input": {"folder": "/…/fotos"}, "select": {"drop_blurriest_pct": 20}}` |
+| «Divídelo en planos y dime cuánto dura cada uno» | `make_storyboard {"input": {"video": "/…"}, "select": {"mode": "shots"}, "output": {"shot_list": ["csv"]}}` |
+| «Hazme un GIF en el que se mueva cada viñeta» | `… "select": {"count": 6}, "output": {"format": "gif"}` |
+| «Una animática del storyboard, con un fundido al final» | `… "panels": [{"duration_s": 3}, …, {"transition": "fundido a negro"}], "output": {"format": "mp4", "animation": {"kind": "animatic"}}` |
+| «Los colores de cada plano» | `… "select": {"mode": "shots"}, "output": {"color_script": true}` |
 | «Copia las 3 mejores fotos de la ráfaga» | `extract_frames {"input": {"folder": "/…/rafaga"}, "select": {"mode": "best", "count": 3}, "output": {"dir": "/…/mejores"}}` |
 | «El fotograma del minuto 5, el más nítido de alrededor, en grande» | `extract_frames {"input": {"video": "/…"}, "select": {"at_s": [300], "snap_s": 0.5}}` |
 
@@ -53,7 +60,7 @@ Con `claude mcp list` deberías ver `storyboard: … ✔ Connected`. Para Claude
 | Herramienta | Qué hace | Escribe | Devuelve |
 |---|---|---|---|
 | `media_info` | Dice qué es la entrada: duración, fps, nº de fotogramas, tamaño y rotación del vídeo, o nombre, formato y tamaño de cada imagen. Es rápida. | nada | JSON |
-| `make_storyboard` | Páginas de viñetas: `grid`, `storyboard`, `list` o `strip`. | PNG, JPG o PDF; opcionalmente, la lista de planos (JSON, CSV) y los fotogramas a tamaño completo | JSON con las rutas y una entrada por viñeta, más una **vista previa** de la página 1 |
+| `make_storyboard` | Páginas de viñetas: `grid`, `storyboard`, `list` o `strip`; un vídeo con ellas (mosaico o animática). | PNG, JPG o PDF; o MP4, WebM, GIF o WebP con la hoja en PNG y fotogramas de muestra; opcionalmente, la lista de planos (JSON, CSV), el guion de color y los fotogramas a tamaño completo | JSON con las rutas y una entrada por viñeta, más una **vista previa** de la página 1 (y, con vídeo, de los fotogramas de muestra) |
 | `extract_frames` | Fotogramas elegidos a tamaño completo, o copias de las imágenes elegidas. | `f00042.jpg`… o `001_<nombre>` | JSON con las rutas |
 | `get_schema` | El JSON Schema de todo, con un ejemplo mínimo y uno completo de cada herramienta. También como recurso MCP `storyboard://schema`. | nada | JSON |
 
@@ -77,6 +84,20 @@ Con `input.images` (una lista) o `input.folder` (una carpeta) se hace lo mismo, 
 
 ![Entrada de imágenes](docs/formatos/fig_imagenes.png)
 
+### Planos
+
+Con `"select": {"mode": "shots"}` sale una viñeta por plano. Cada una lleva en el JSON `shot_in_s`, `shot_out_s`, `duration_s` y cómo empieza y acaba el plano (`cut`, `fade_in` / `fade_out` o `dissolve`), y la lista de planos los guarda también:
+
+![Planos de un vídeo](docs/formatos/fig_planos.png)
+
+### Vídeo
+
+Con `"output": {"format": "gif"}` (o `mp4`, `webm`, `webp`), cada viñeta reproduce su tramo del vídeo, todas a la vez y con su barra de progreso. Este WebP es una salida real:
+
+![Mosaico animado](docs/formatos/mosaico.webp)
+
+Con `"animation": {"kind": "animatic"}`, las viñetas salen una detrás de otra con su duración, sus fundidos o encadenados y sus notas; con fotos, es una presentación. Detalles y fotogramas de cada caso en [docs/formatos.md](docs/formatos.md#311-vídeo-mosaico-animado-y-animática).
+
 ## La estructura JSON común
 
 Todas las herramientas reciben las mismas secciones. **Solo `input` es obligatoria**: `{"input": {"video": "/ruta/clip.mp4"}}` ya funciona con los valores por defecto. Una clave desconocida da error (con sugerencia si es una errata), nunca se ignora sin avisar.
@@ -84,11 +105,11 @@ Todas las herramientas reciben las mismas secciones. **Solo `input` es obligator
 | Sección | Para qué | Campos principales (valor por defecto) |
 |---|---|---|
 | `input` | Qué mirar: **exactamente uno** de `video`, `images` o `folder` | `video` (ruta) · `images` (lista de rutas, 1–1000) · `folder` (ruta: todas las imágenes) + `pattern` (opcional, p. ej. `"*.jpg"`; sin distinguir mayúsculas) |
-| `select` | Qué fotogramas o imágenes son viñetas | `mode`: `sharpest` (el más nítido de cada tramo), `even` (el del centro), `best` (los N más nítidos), `all` (todos); `auto` es `sharpest` en vídeo y, en imágenes, `all` (o `sharpest` si das `count`) · `count` (12) · `every_s` / `every_pct` · posiciones exactas: `step_pct`, `step_s`, `at_pct`, `at_s`, `at_frames`, `at_images`, `at_names` · `snap_s` (0) · rango: `start_s`, `end_s`, `start_pct`, `end_pct` · filtros: `min_sharpness`, `drop_blurriest_pct`, `min_gap_s`, `min_difference` |
+| `select` | Qué fotogramas o imágenes son viñetas | `mode`: `sharpest` (el más nítido de cada tramo), `even` (el del centro), `best` (los N más nítidos), `all` (todos), `shots` (uno por plano); `auto` es `sharpest` en vídeo y, en imágenes, `all` (o `sharpest` si das `count`) · `count` (12) · `every_s` / `every_pct` · posiciones exactas: `step_pct`, `step_s`, `at_pct`, `at_s`, `at_frames`, `at_images`, `at_names` · `snap_s` (0) · rango: `start_s`, `end_s`, `start_pct`, `end_pct` · filtros: `min_sharpness`, `drop_blurriest_pct`, `min_gap_s`, `min_difference` · planos: `shot_threshold` (20), `min_shot_s` (0,4), `fades` (true) |
 | `panels` | Notas por viñeta, en orden (o con posición propia) | `shot`, `camera`, `action`, `dialogue`, `sound`, `transition`, `duration_s`, `number`; posición: `frame`, `at_s`, `at_pct`, `image`, `image_name` |
 | `layout` | Cómo se colocan | `template` (`grid`) · `columns` (grid 4, storyboard 3) · `rows` · `page` (`auto`, `A4`, `Letter`, `16:9`) · `orientation` · `panel_width` (480) · `aspect` (`source`) · `fit` · `margin`, `gap`, `padding` · `header`, `title`, `subtitle`, `footer`, `footer_text` · `label`, `numbering`, `notes`, `guides` · `language` (`es`, `en`) |
 | `style` | Colores, fuentes y tamaños | `theme` (`dark`: fondo `#000000`; `light`: `#ffffff`) · `background`, `text`, `text_secondary`, `accent`, `label_background`, `label_text`, `panel_border`, `border_width`, `notes_background`, `notes_text`, `notes_rule`, `guides` · `font`, `font_bold` · `title_size`, `text_size`, `label_size`, `number_size`, `notes_size` · `sharpen` (0.5) |
-| `output` | Dónde y cómo se guarda | `dir` (temporal) · `name` (`<entrada>_<plantilla>`) · `format` (`png`, `jpg`, `pdf`; `webp`, `gif`, `mp4` y `webm`, previstos) · `quality` (90) · `dpi` (150) · `shot_list` (`["json", "csv"]`) · `csv_style` (`standard`; `excel_es` para Excel en español) · `frames` · `also_without_labels` · `preview` (true). En `extract_frames`: `dir`, `format` y `names` (`numbered` o `original`) |
+| `output` | Dónde y cómo se guarda | `dir` (temporal) · `name` (`<entrada>_<plantilla>`) · `format` (`png`, `jpg`, `pdf`, y animados: `mp4`, `webm`, `gif`, `webp`) · `animation`: `kind` (`mosaic`, `animatic`), `fps` (12), `duration_s`, `panel_s` (2), `transition` (`cut`), `fade_s` (0,5), `max_side`, `progress` · `quality` (90) · `dpi` (150) · `shot_list` (`["json", "csv"]`) · `csv_style` (`standard`; `excel_es` para Excel en español) · `frames` · `also_without_labels` · `color_script` (false) y `color_count` (5) · `preview` (true). En `extract_frames`: `dir`, `format` y `names` (`numbered` o `original`) |
 
 - **Posiciones:** los fotogramas van de 0 a `frames − 1`. Los segundos cuentan desde el primer fotograma (0,0 s). En %, 0 es el primer fotograma o la primera imagen y 100 el último. Las imágenes se indican por índice (0…) o por nombre de archivo.
 - **Colores:** `#RRGGBB`, `#RRGGBBAA` (con transparencia), `#RGB`, `#RGBA` o un nombre CSS (`"white"`). Los valores de lista (`"PDF"`, `"a4"`, `"Storyboard"`) valen en mayúsculas o minúsculas.
@@ -185,7 +206,9 @@ print(m.run_tool('make_storyboard', {'input': {'video': 'mi_video.mp4'}})[0]['pa
 
 - **Memoria:** el modo por tramos mide todos los fotogramas del rango con copias pequeñas y guarda solo los elegidos, ya reducidos al tamaño de la viñeta. Las posiciones exactas saltan a cada punto sin decodificar todo el vídeo, así que son el modo rápido en películas largas.
 - **Rotación:** los vídeos de móvil guardan un giro en el archivo y las fotos, la orientación EXIF. Las imágenes salen tal como se grabaron: `rotation_deg` y `displayed_size` lo indican.
-- **Límites:** 1000 imágenes por entrada, 500 viñetas y 200 páginas por llamada, y 150 Mpx por página. Si se superan, el error dice cómo repartirlo (`layout.rows`, `count`…).
+- **Límites:** 1000 imágenes por entrada, 500 viñetas y 200 páginas por llamada, y 150 Mpx por página. Un vídeo: 300 s, 3600 fotogramas, 30 fps y 3840 px (1280 px en GIF y WebP). Si se superan, el error dice cómo repartirlo (`layout.rows`, `count`, `duration_s`…).
+- **Planos:** como el modo por tramos, mide todos los fotogramas del rango (un vídeo de 3 min a 720p tarda unos 12 s); una película larga va mejor por partes, con `start_s` y `end_s`.
+- **Vídeo:** MP4 en H.264 (libx264), WebM en VP9, GIF con una paleta para toda la animación y WebP animado, todo con PyAV. GIF y WebP se repiten sin fin.
 - **PDF:** las páginas se guardan como imagen dentro del PDF, así que el texto no se puede seleccionar.
 - **Problema conocido:** si ejecutas el servidor desde una carpeta con archivos que se llamen como módulos estándar de Python (`inspect.py`, `json.py`…), la importación de PyAV puede fallar. Usa la ruta absoluta de `server.py`, como en los ejemplos.
 

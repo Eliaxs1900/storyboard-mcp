@@ -1,0 +1,202 @@
+{
+ "pages": [
+  {
+   "page": 1,
+   "path": "/Users/ana/ejemplos/mosaico.png",
+   "size": [
+    960,
+    474
+   ],
+   "panels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ]
+  }
+ ],
+ "videos": [
+  {
+   "kind": "mosaic",
+   "page": 1,
+   "path": "/Users/ana/ejemplos/mosaico.gif",
+   "format": "gif",
+   "codec": "gif",
+   "size": [
+    960,
+    474
+   ],
+   "fps": 12,
+   "frames": 40,
+   "duration_s": 3.333,
+   "bytes": 4282768,
+   "loop": true,
+   "samples": "/Users/ana/ejemplos/mosaico_samples.png",
+   "sample_times_s": [
+    0.0,
+    0.67,
+    1.33,
+    1.92,
+    2.58,
+    3.25
+   ]
+  }
+ ],
+ "panels": [
+  {
+   "n": 1,
+   "number": "1",
+   "page": 1,
+   "frame": 20,
+   "time_s": 0.667,
+   "timecode": "0:00:00.7",
+   "pct": 3.3,
+   "sharpness": 2928.9,
+   "sharpness_pct": 90,
+   "clip_s": [
+    0.0,
+    3.328
+   ],
+   "speed": 1.0
+  },
+  {
+   "n": 2,
+   "number": "2",
+   "page": 1,
+   "frame": 169,
+   "time_s": 5.633,
+   "timecode": "0:00:05.6",
+   "pct": 28.2,
+   "sharpness": 2940.0,
+   "sharpness_pct": 90,
+   "clip_s": [
+    3.328,
+    6.656
+   ],
+   "speed": 1.0
+  },
+  {
+   "n": 3,
+   "number": "3",
+   "page": 1,
+   "frame": 289,
+   "time_s": 9.633,
+   "timecode": "0:00:09.6",
+   "pct": 48.2,
+   "sharpness": 2907.9,
+   "sharpness_pct": 89,
+   "clip_s": [
+    6.656,
+    9.983
+   ],
+   "speed": 1.0
+  },
+  {
+   "n": 4,
+   "number": "4",
+   "page": 1,
+   "frame": 389,
+   "time_s": 12.967,
+   "timecode": "0:00:13.0",
+   "pct": 64.9,
+   "sharpness": 2885.0,
+   "sharpness_pct": 89,
+   "clip_s": [
+    9.983,
+    13.311
+   ],
+   "speed": 1.0
+  },
+  {
+   "n": 5,
+   "number": "5",
+   "page": 1,
+   "frame": 498,
+   "time_s": 16.6,
+   "timecode": "0:00:16.6",
+   "pct": 83.1,
+   "sharpness": 2972.1,
+   "sharpness_pct": 91,
+   "clip_s": [
+    13.311,
+    16.639
+   ],
+   "speed": 1.0
+  },
+  {
+   "n": 6,
+   "number": "6",
+   "page": 1,
+   "frame": 599,
+   "time_s": 19.967,
+   "timecode": "0:00:20.0",
+   "pct": 100.0,
+   "sharpness": 3254.5,
+   "sharpness_pct": 100,
+   "anchor": "last_frame",
+   "clip_s": [
+    16.639,
+    19.967
+   ],
+   "speed": 1.0
+  }
+ ],
+ "dropped": [],
+ "selection": {
+  "mode": "sharpest",
+  "range_s": [
+   0.0,
+   19.97
+  ],
+  "range_pct": [
+   0.0,
+   100.0
+  ],
+  "measured": 600,
+  "threshold": 0.0,
+  "sharpness_stats": {
+   "min": 125.5,
+   "p25": 149.2,
+   "median": 2797.1,
+   "p75": 2897.5,
+   "max": 3254.5
+  }
+ },
+ "layout": {
+  "template": "grid",
+  "columns": 3,
+  "rows_per_page": 2,
+  "picture_size": [
+   320,
+   180
+  ],
+  "page": "auto",
+  "page_size": [
+   960,
+   474
+  ],
+  "theme": "dark"
+ },
+ "input": {
+  "kind": "video",
+  "video": {
+   "path": "/Users/ana/ejemplos/ciudad.mp4",
+   "duration_s": 20.0,
+   "fps": 30.0,
+   "frames": 600,
+   "size": [
+    640,
+    360
+   ],
+   "rotation_deg": 0,
+   "displayed_size": [
+    640,
+    360
+   ],
+   "codec": "mpeg4"
+  }
+ },
+ "warnings": []
+}

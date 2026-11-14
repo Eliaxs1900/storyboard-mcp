@@ -4,17 +4,18 @@ Qué devuelve cada herramienta, cómo es cada salida y qué argumentos la produc
 
 Todas las imágenes de esta página son **salidas reales** del servidor. Las crea [`generar_ejemplos.py`](generar_ejemplos.py) a partir de un vídeo y unas fotos sintéticos. Cada fotograma del vídeo lleva escritos su número, su tiempo y su %, así que se puede comprobar a simple vista que las etiquetas y el JSON dicen la verdad. Las respuestas JSON completas de cada ejemplo están en [`formatos/json/`](formatos/json/). En ellas, las rutas empiezan por `/Users/ana/ejemplos/`, que es una ruta de ejemplo.
 
-> **Lo esencial, en 6 líneas**
+> **Lo esencial, en 7 líneas**
 > 1. Llama con un objeto JSON. **Solo `input` es obligatorio**: `{"input": {"video": "/ruta/absoluta/clip.mp4"}}`.
 > 2. `input` lleva **exactamente uno** de estos tres: `video` (ruta), `images` (lista de rutas) o `folder` (ruta).
 > 3. La respuesta es **JSON**, con las **rutas absolutas** de los archivos creados: ábrelos para ver el resultado. `make_storyboard` añade una **vista previa** de la página 1 como imagen.
 > 4. En el vídeo, los fotogramas van de `0` a `frames − 1`, los segundos cuentan desde el primer fotograma (0,0 s) y en % el 0 es el primer fotograma y el 100 el último. Las imágenes van por índice (`0`…) o por nombre de archivo.
 > 5. Un error en los argumentos dice **qué campo** falla (p. ej. `layout.columns`), qué se esperaba y qué llegó. Una clave desconocida nunca se ignora sin avisar.
 > 6. El esquema completo está en la herramienta `get_schema`, en el recurso MCP `storyboard://schema` y en [`schema.json`](../schema.json).
+> 7. Los formatos animados (`mp4`, `webm`, `gif`, `webp`) traen siempre la hoja fija (PNG), una imagen con fotogramas de muestra y el JSON: un asistente no puede ver un vídeo, así que mira esas imágenes.
 
 ![Usos: lo que pides y lo que sale](formatos/fig_usos.png)
 
-**Índice:** [Resumen](#1-resumen) · [media_info](#2-media_info) · [make_storyboard](#3-make_storyboard): [mínimo](#31-la-llamada-mínima), [plantillas](#32-plantillas-de-página), [selección](#33-qué-fotogramas-se-eligen), [filtros](#34-filtros-sin-movidos-ni-repetidos), [etiquetas](#35-etiquetas-y-numeración), [guías](#36-guías), [temas](#37-temas-colores-y-fuentes), [imágenes](#38-entrada-de-imágenes), [PDF y lista de planos](#39-pdf-páginas-y-lista-de-planos), [archivos](#310-archivos-que-escribe), [respuesta](#311-la-respuesta-json) · [extract_frames](#4-extract_frames) · [get_schema](#5-get_schema-y-schemajson) · [Errores](#6-errores)
+**Índice:** [Resumen](#1-resumen) · [media_info](#2-media_info) · [make_storyboard](#3-make_storyboard): [mínimo](#31-la-llamada-mínima), [plantillas](#32-plantillas-de-página), [selección](#33-qué-fotogramas-se-eligen), [filtros](#34-filtros-sin-movidos-ni-repetidos), [etiquetas](#35-etiquetas-y-numeración), [guías](#36-guías), [temas](#37-temas-colores-y-fuentes), [imágenes](#38-entrada-de-imágenes), [PDF y lista de planos](#39-pdf-páginas-y-lista-de-planos), [planos](#310-planos-cortes-fundidos-y-encadenados), [vídeo](#311-vídeo-mosaico-animado-y-animática), [guion de color](#312-guion-de-color), [archivos](#313-archivos-que-escribe), [respuesta](#314-la-respuesta-json) · [extract_frames](#4-extract_frames) · [get_schema](#5-get_schema-y-schemajson) · [Errores](#6-errores)
 
 ---
 
@@ -23,7 +24,7 @@ Todas las imágenes de esta página son **salidas reales** del servidor. Las cre
 | Herramienta | Úsala para | Escribe | Devuelve |
 |---|---|---|---|
 | `media_info` | Saber qué es la entrada y sus límites (duración, fps, nº de fotogramas, tamaños) antes de pedir posiciones | nada | JSON: `kind`, y `video` o `images` |
-| `make_storyboard` | **Ver** un vídeo o unas fotos, y hacer storyboards | Páginas PNG o JPG, o un PDF. Opcionalmente, la lista de planos (JSON y CSV) y los fotogramas a tamaño completo | JSON: `pages`, `pdf`, `panels`, `dropped`, `selection`, `layout`, `input`, `warnings`. Además, una **imagen**: la vista previa de la página 1 |
+| `make_storyboard` | **Ver** un vídeo o unas fotos, separarlo en planos y hacer storyboards, animáticas o mosaicos animados | Páginas PNG o JPG, o un PDF; o un vídeo (MP4, WebM, GIF, WebP) con la hoja fija en PNG y una imagen de fotogramas de muestra. Opcionalmente, la lista de planos (JSON y CSV), el guion de color y los fotogramas a tamaño completo | JSON: `pages`, `pdf`, `videos`, `color_script`, `panels`, `dropped`, `selection`, `layout`, `input`, `warnings`. Además, **imágenes**: la vista previa de la página 1 (y, con vídeo, de los fotogramas de muestra) |
 | `extract_frames` | Ver un detalle a **tamaño completo**, o sacar las mejores fotos de una serie | Un JPEG o PNG por fotograma, o copias de las imágenes | JSON: `dir`, `files`, `dropped`, `selection`, `input` |
 | `get_schema` | Consultar qué acepta cada campo | nada | JSON Schema de entrada y de respuesta, más ejemplos |
 
@@ -93,8 +94,9 @@ El vídeo de muestra se desenfoca en la primera mitad de cada segundo, como uno 
 | Exactas, pero sin movidos | añade `"snap_s": 0.5`: solo se mueve la posición cuyo fotograma es claramente más borroso (menos del 80 %) que el más nítido a ± 0,5 s; las nítidas se quedan exactas |
 | Solo una parte | `{"start_s": 120, "end_s": 180}` o `{"start_pct": 25, "end_pct": 75}` |
 | Cada viñeta con su fotograma y sus notas | sin `select`: `"panels": [{"frame": 120, "action": "…"}, {"at_s": 9.5, "action": "…"}]` |
+| Una viñeta por plano, con sus cortes, fundidos y encadenados | `{"mode": "shots"}`: ver [3.10](#310-planos-cortes-fundidos-y-encadenados) |
 
-Las posiciones exactas saltan a cada punto sin decodificar todo el vídeo, así que son **el modo rápido en películas largas**. Los tramos miden todos los fotogramas del rango. En `sharpest`, dos viñetas seguidas quedan separadas al menos medio tramo, para que no salgan dos fotogramas casi pegados. `selection.mode` dice qué modo se usó: `sharpest`, `even`, `best`, `all`, `positions` o `panels`.
+Las posiciones exactas saltan a cada punto sin decodificar todo el vídeo, así que son **el modo rápido en películas largas**. Los tramos miden todos los fotogramas del rango. En `sharpest`, dos viñetas seguidas quedan separadas al menos medio tramo, para que no salgan dos fotogramas casi pegados. `selection.mode` dice qué modo se usó: `sharpest`, `even`, `best`, `all`, `shots`, `positions` o `panels`.
 
 Si salen menos viñetas de las pedidas, o alguna posición exacta cae en un fotograma movido, `warnings` lo dice y propone el arreglo. Por ejemplo: `"select: 8 panels asked for, 7 given: 1 removed by the filters (see dropped)"`.
 
@@ -120,8 +122,8 @@ Si un filtro descarta el fotograma elegido en un tramo, se toma el siguiente mej
 
 ![Etiquetas y numeración](formatos/fig_etiquetas.png)
 
-- `layout.label.fields`: los campos, en orden. Con vídeo: `number`, `frame` (#123), `time` (4.1s), `timecode` (0:00:04.1), `pct`, `sharpness`, `sharpness_pct`, `anchor` (*primer / último fotograma*). Con imágenes: `number`, `image` (#3), `name` (nombre del archivo), `size`, `pct`, `sharpness`, `sharpness_pct`.
-- `layout.label.template`: texto libre con variables: `{number}` `{frame}` `{frames_total}` `{time}` `{timecode}` `{pct}` `{pct1}` `{sharpness}` `{sharpness_pct}` `{anchor}` `{image}` `{name}` `{images_total}` `{size}`.
+- `layout.label.fields`: los campos, en orden. Con vídeo: `number`, `frame` (#123), `time` (4.1s), `timecode` (0:00:04.1), `pct`, `sharpness`, `sharpness_pct`, `anchor` (*primer / último fotograma*). Con imágenes: `number`, `image` (#3), `name` (nombre del archivo), `size`, `pct`, `sharpness`, `sharpness_pct`. Solo con `select.mode: "shots"`: `shot_in` (entrada del plano), `shot_out` (salida), `duration` (2.5s) y `transition` (cómo acaba: corte, fundido a negro, encadenado…).
+- `layout.label.template`: texto libre con variables: `{number}` `{frame}` `{frames_total}` `{time}` `{timecode}` `{pct}` `{pct1}` `{sharpness}` `{sharpness_pct}` `{anchor}` `{image}` `{name}` `{images_total}` `{size}` y, en `shots`, `{shot_in}` `{shot_out}` `{duration}` `{transition}`.
 - `layout.label.position`: `top` o `bottom`. `layout.label.show: false` quita las etiquetas.
 - `layout.numbering.format`: `{n}` es el número que corre, con el formato de Python: `"5.{n}"` → 5.1, 5.2…; `"SH{n:03d}"` → SH001. `start` es el primer número y `step`, el salto: `{"start": 10, "step": 10, "format": "SH{n:03d}"}` → SH010, SH020, SH030. `panels[i].number` pone el número de una sola viñeta, por ejemplo `"12A"` para un inserto.
 - `layout.language`: `es` (defecto) o `en` para los textos de la página: «primer fotograma», «ACCIÓN», «página 1 de 3»…
@@ -190,7 +192,71 @@ n,number,page,frame,time_s,timecode,pct,image,name,shot,camera,action,dialogue,s
 
 En el PDF las páginas son imágenes, así que su texto no se puede seleccionar. Si necesitas leer los números, usa la vista previa o pide `png`. JSON: [`pdf.json`](formatos/json/pdf.json).
 
-### 3.10 Archivos que escribe
+### 3.10 Planos: cortes, fundidos y encadenados
+
+```json
+{"input": {"video": ".../planos.mp4"}, "select": {"mode": "shots"}}
+```
+
+![Planos de un vídeo y su línea de tiempo](formatos/fig_planos.png)
+
+- **Una viñeta por plano**: el fotograma más nítido del plano, fuera de sus transiciones. No hace falta `count`: salen tantas como planos haya (hasta 500; una película larga, por partes, con `start_s` y `end_s`).
+- Cada viñeta del JSON trae, además de lo de siempre:
+
+| Campo | Qué es |
+|---|---|
+| `shot_in_s`, `shot_out_s` | Dónde empieza el plano (su primer fotograma) y dónde acaba (el primer fotograma del siguiente, o el final del rango), en segundos. Los planos van seguidos: `shot_out_s` de uno es `shot_in_s` del siguiente |
+| `duration_s` | `shot_out_s − shot_in_s` |
+| `shot_frames` | `[primero, último]` fotograma del plano |
+| `transition_in` | Cómo empieza: `start` (ahí empieza el rango), `cut` (corte), `fade_in` (desde un color liso, casi siempre negro) o `dissolve` (encadenado con el anterior) |
+| `transition_out` | Cómo acaba: `cut`, `fade_out` (a un color liso), `dissolve` o `end` (ahí acaba el rango) |
+| `transition_in_s`, `transition_out_s` | Lo que dura una transición gradual, en segundos (en los cortes no aparece). Un encadenado se reparte entre los dos planos y cuenta entero en los dos |
+
+- `selection.shots` resume lo que encontró: `found` (planos), `cuts`, `fades` y `dissolves` (transiciones de cada tipo), y el `threshold` y el `min_shot_s` usados. El pie de la hoja lo dice también.
+- **Cómo los encuentra**, con copias de 64×36 en color de todos los fotogramas del rango:
+  - un **corte** es un salto entre dos fotogramas seguidos de al menos `shot_threshold` (20, en una escala de 0 a 255) que además dobla el movimiento de alrededor. Un fotograma suelto distinto (un flash) no cuenta;
+  - un **encadenado** es un tramo en el que el fotograma del medio es la mezcla de los de los extremos;
+  - un **fundido** son fotogramas que se acercan poco a poco a uno liso (negro o blanco). En un fundido a negro, el cambio de plano se pone en medio del negro.
+- **Ajustes:** `shot_threshold` (más bajo, 10–15, encuentra cortes entre planos parecidos; más alto, 30 o más, ignora el movimiento rápido), `min_shot_s` (0,4 s: el plano más corto; un corte más cerca del anterior no se usa) y `fades: false` (solo cortes; un negro entre dos planos los sigue separando).
+- **Etiquetas:** por defecto, número · entrada · duración · transición («1 · 0:00:00.0 · 3.0s · corte»). Los campos son `shot_in`, `shot_out`, `duration` y `transition` (ver [3.5](#35-etiquetas-y-numeración)).
+- **Lista de planos:** el JSON lleva estos campos; el CSV, las columnas `shot_in_s`, `shot_out_s`, `transition_in` y `transition_out`, y en `duration_s` la duración de `panels[]` si la diste o, si no, la del plano.
+- `extract_frames` con `"select": {"mode": "shots"}` guarda el fotograma de cada plano con los mismos datos.
+- **No** reconoce el tipo de plano, los personajes ni el diálogo: eso se escribe en las notas de `panels[]` (`shot`, `action`, `dialogue`…).
+
+JSON: [`planos.json`](formatos/json/planos.json).
+
+### 3.11 Vídeo: mosaico animado y animática
+
+```json
+{"input": {"video": ".../ciudad.mp4"}, "select": {"count": 6}, "output": {"format": "gif"}}
+```
+
+![Mosaico animado, animáticas y presentación](formatos/fig_video.png)
+
+- `output.format`: `mp4` (H.264), `webm` (VP9), `gif` o `webp` (estos dos se repiten sin fin). Se ajusta en `output.animation`.
+- Además del vídeo se escriben **siempre** la hoja fija en PNG (`pages`) y `<name>_samples.png`, una imagen con fotogramas de muestra del vídeo y sus tiempos (`videos[].samples`). Un asistente no puede ver un vídeo: que mire esas dos imágenes. Con `preview` (por defecto), la respuesta trae las dos como imagen.
+- `animation.kind`:
+  - **`mosaic`** (por defecto con vídeo): la misma hoja, con cada viñeta reproduciendo su tramo en bucle, todas a la vez, y una barra de progreso bajo cada una; la marca blanca es el fotograma de la hoja. El tramo de una viñeta es su parte del vídeo en `sharpest` y `even`, su plano en `shots` y, con posiciones exactas, desde su fotograma hasta el de la viñeta siguiente (al menos 1 s). El JSON da a cada viñeta `clip_s` (`[inicio, fin]` del tramo) y `speed` (1 = tiempo real). Solo con vídeo.
+  - **`animatic`** (por defecto con imágenes): las viñetas una detrás de otra, cada una dibujada como en la plantilla (`layout.template`, con su número, su etiqueta y sus notas), con su duración y su transición, y una barra de progreso con una marca por viñeta. El JSON da a cada viñeta `video_s`: cuándo está en pantalla. Con imágenes es una presentación temporizada.
+- **En la animática**, la duración de cada viñeta es `panels[].duration_s`; si no la tiene, con `"mode": "shots"`, lo que dura el plano; si no, `panel_s` (2 s). La transición es `panels[].transition` (un texto con «fund» o «fade» es un fundido a negro; con «encaden» o «dissolv», un encadenado; cualquier otro, un corte); si no la tiene, la que se detectó en `shots`; si no, `animation.transition` (`cut`, `fade` o `dissolve`; por defecto `cut`). `fade_s` (0,5 s) es lo que dura cada fundido o encadenado.
+- `duration_s` es, en el mosaico, lo que dura el bucle (por defecto, el tramo más largo, hasta 8 s): un tramo más largo se acelera y uno más corto vuelve a empezar. En la animática es el total: si lo das, todas las duraciones se escalan para que quepan.
+- `max_side`: el lado mayor del vídeo, en px (por defecto 1920 en `mp4` y `webm`, 960 en `gif` y `webp`); la página se reduce para que quepa. También `fps` (12), `progress` (las barras de progreso) y `output.quality` (90).
+- **Límites:** 300 s, 3600 fotogramas (`duration_s × fps`), 30 fps, 3840 px (`gif` y `webp`, 1280 px) y, en el mosaico, 10 páginas (es un vídeo por página). Si se pasan, el error dice qué bajar.
+
+En el [README](../README.md#vídeo) hay un mosaico de verdad, animado. JSON: [`mosaico.json`](formatos/json/mosaico.json), [`animatica.json`](formatos/json/animatica.json), [`animatica_planos.json`](formatos/json/animatica_planos.json), [`presentacion.json`](formatos/json/presentacion.json).
+
+### 3.12 Guion de color
+
+```json
+{"input": {"video": ".../planos.mp4"}, "select": {"mode": "shots"}, "output": {"color_script": true}}
+```
+
+![Guion de color](formatos/fig_guion_color.png)
+
+- `"color_script": true` escribe `<name>_colors.png`, una tira con los colores dominantes de cada viñeta en orden, y añade a cada viñeta del JSON `colors`: sus `color_count` (5) colores, de más a menos, cada uno con su `hex` y su `pct` (el % de la imagen que ocupa).
+- Se miden en la imagen entera, sin las bandas de `fit: "contain"`. En el CSV de la lista de planos salen en la columna `colors`.
+
+### 3.13 Archivos que escribe
 
 Van a `output.dir`, o a `<temp>/storyboard-mcp/<nombre de la entrada>/` si no se da. Se llaman `output.name`, o `<entrada>_<plantilla>` por defecto:
 
@@ -199,11 +265,14 @@ Van a `output.dir`, o a `<temp>/storyboard-mcp/<nombre de la entrada>/` si no se
 | `<name>.png` (o `.jpg`) | una página |
 | `<name>_p1.png`, `<name>_p2.png`… | varias páginas |
 | `<name>.pdf` | `"format": "pdf"` (todas las páginas en un archivo) |
+| `<name>.mp4`, `.webm`, `.gif` o `.webp` | formato animado (un mosaico de varias páginas: `_p1`, `_p2`…). Las páginas se escriben además en PNG |
+| `<name>_samples.png` | con formato animado: fotogramas de muestra del vídeo, con sus tiempos |
+| `<name>_colors.png` | `"color_script": true` |
 | `<name>_nolabels…` | `"also_without_labels": true` |
 | `<name>_shots.json`, `<name>_shots.csv` | `"shot_list": ["json", "csv"]` |
 | `<name>_frames/f00042.jpg` / `<name>_frames/001_foto.jpg` | `"frames": true` (vídeo: fotograma 42 a tamaño completo; imágenes: copia sin cambios) |
 
-### 3.11 La respuesta JSON
+### 3.14 La respuesta JSON
 
 Respuesta de la llamada mínima, recortada (completa: [`minimo.json`](formatos/json/minimo.json)):
 ```json
@@ -225,10 +294,11 @@ Respuesta de la llamada mínima, recortada (completa: [`minimo.json`](formatos/j
 | Campo | Qué es |
 |---|---|
 | `pages[]` | `page`, `path` (la imagen de la página; con PDF, el archivo PDF), `size` y `panels` (los `n` de las viñetas de esa página) |
-| `pdf`, `pages_without_labels`, `shot_list`, `frames_dir` | Solo cuando se piden |
-| `panels[]` | Una por viñeta, en orden. `n` (1…), `number` (lo que se imprime), `page`. Vídeo: `frame`, `time_s` (3 decimales; las etiquetas lo redondean a décimas), `timecode`, `anchor` (`first_frame` / `last_frame`). Imágenes: `image`, `name`, `source`. Siempre: `pct`, `sharpness` (mayor = más nítida; solo se comparan valores de la misma respuesta) y `sharpness_pct` (% de la más nítida). Si se pidió, `file` y `size` (el archivo a tamaño completo y sus píxeles) y `notes` |
+| `pdf`, `pages_without_labels`, `shot_list`, `frames_dir`, `color_script` | Solo cuando se piden |
+| `videos[]` | Con formato animado: `kind` (`mosaic` o `animatic`), `page`, `path`, `format`, `codec`, `size`, `fps`, `frames`, `duration_s`, `bytes`, `loop` (si se repite solo), `samples` (la imagen de fotogramas de muestra) y `sample_times_s` |
+| `panels[]` | Una por viñeta, en orden. `n` (1…), `number` (lo que se imprime), `page`. Vídeo: `frame`, `time_s` (3 decimales; las etiquetas lo redondean a décimas), `timecode`, `anchor` (`first_frame` / `last_frame`). Imágenes: `image`, `name`, `source`. Siempre: `pct`, `sharpness` (mayor = más nítida; solo se comparan valores de la misma respuesta) y `sharpness_pct` (% de la más nítida). Si se pidió, `file` y `size` (el archivo a tamaño completo y sus píxeles) y `notes`. Con `"mode": "shots"`, los datos del plano ([3.10](#310-planos-cortes-fundidos-y-encadenados)); con vídeo, `clip_s` y `speed` (mosaico) o `video_s` (animática); con guion de color, `colors` |
 | `dropped[]` | Lo que quitaron los filtros: `frame` o `image` y `name`; `reason` (`min_gap_s`, `min_difference` o `min_sharpness`); `similar_to` (el fotograma o la imagen con la que se comparó) y `difference` |
-| `selection` | `mode`; el rango (`range_s` en vídeo, `range_pct`); `measured`, cuántos fotogramas o imágenes se midieron (todos los del rango en los tramos; solo los candidatos en las posiciones exactas); `threshold`, la nitidez mínima que dieron `min_sharpness` o `drop_blurriest_pct` (0 = sin umbral); y `sharpness_stats`, el mínimo, los percentiles 25, 50 y 75 y el máximo de lo medido, tomando siempre un valor medido real (sin interpolar) |
+| `selection` | `mode`; el rango (`range_s` en vídeo, `range_pct`); `measured`, cuántos fotogramas o imágenes se midieron (todos los del rango en los tramos; solo los candidatos en las posiciones exactas); `threshold`, la nitidez mínima que dieron `min_sharpness` o `drop_blurriest_pct` (0 = sin umbral); y `sharpness_stats`, el mínimo, los percentiles 25, 50 y 75 y el máximo de lo medido, tomando siempre un valor medido real (sin interpolar). Con `"mode": "shots"`, `shots` |
 | `input` | Lo mismo que `media_info`, sin la lista de imágenes: en vídeo, `video`; en imágenes, `count`, `formats` y `sizes` (los tamaños distintos, ya girados según el EXIF) |
 | `layout` | Lo que se usó de verdad: columnas, filas por página, tamaño de cada imagen y de la página |
 | `warnings[]` | Avisos que no impiden el resultado: campos que no se usaron, posiciones después del final, notas de más… |
@@ -243,7 +313,7 @@ Los campos que no tienen valor **no aparecen**: no se envían como `null`.
 
 ![extract_frames](formatos/fig_extract_frames.png)
 
-- Usa los mismos `input` y `select` que `make_storyboard`. Sin `select`, saca los 12 más nítidos.
+- Usa los mismos `input` y `select` que `make_storyboard`. Sin `select`, saca los 12 más nítidos; con `"mode": "shots"`, uno por plano (con `shot_in_s`, `shot_out_s` y sus transiciones).
 - **Vídeo:** un archivo por fotograma, `f<número de 5 cifras>.jpg` (el fotograma 42 → `f00042.jpg`), a tamaño completo y ya **derecho** (con el giro del móvil aplicado; mide `displayed_size`). Puede ser `"format": "png"`. Con `snap_s`, el fotograma guardado (`frame`) puede ser otro, cercano al pedido: en el ejemplo se pidió el 90 y se guardó el 89, el más nítido a ± 0,5 s.
 - **Imágenes:** una copia **byte a byte** de cada imagen elegida, `001_<nombre>`, `002_<nombre>`… en orden, o con su nombre original si `"names": "original"`. Con `"format": "jpg"` o `"png"` se convierten.
 - Respuesta: `dir` y, en `files[]`, las mismas claves que `panels[]`, con `file` (la ruta) y `size` (sus píxeles). JSON: [`extraer_pct.json`](formatos/json/extraer_pct.json), [`extraer_snap.json`](formatos/json/extraer_snap.json), [`extraer_fotos.json`](formatos/json/extraer_fotos.json).
@@ -275,7 +345,12 @@ Otros errores que puedes encontrarte:
 | `input.images[1]: not an image this server can read: notas.txt` | Quita ese archivo, o usa `folder` con `pattern` |
 | `select.at_s: only for video input; with images use …` | Usa el campo que propone |
 | `panels: either every panel has a position … or none has` | Pon posición en todas las viñetas o en ninguna |
-| `output.format: "mp4" is planned for animated output and not available yet` | Usa `png`, `jpg` o `pdf` |
+| `output.animation: only used with an animated output.format …` | Pon `"format": "mp4"` (o `webm`, `gif`, `webp`), o quita `animation` |
+| `output.animation.kind: "mosaic" needs a video …` | Con imágenes, usa `"animatic"` (o no lo pongas) |
+| `output.animation.max_side: 1920 px is too big for gif (at most 1280 px) …` | Un `max_side` menor, o `mp4` / `webm` |
+| `output.animation.duration_s: the animatic would last 400 s …; the limit is 300 s` | Da `animation.duration_s` para escalarla, o menos viñetas, o un `panel_s` más corto |
+| `layout.label.fields[0]: "duration" needs select.mode "shots"` | Pon `"select": {"mode": "shots"}` o quita ese campo |
+| `select: 612 shots found; the limit is 500 panels per call …` | Hazlo por partes con `start_s` y `end_s` |
 | `layout.numbering: expected an object like {"format": "5.{n}"}` | Esa sección es un objeto con campos, no un texto suelto |
 | `select: every frame was filtered out; lower …` | Afloja los filtros (`min_*`) |
 | Una ruta relativa que no existe | El mensaje dice desde qué carpeta se resolvió: usa una ruta absoluta |

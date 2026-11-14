@@ -1,0 +1,263 @@
+{
+ "pages": [
+  {
+   "page": 1,
+   "path": "/Users/ana/ejemplos/animatica_planos.png",
+   "size": [
+    1920,
+    732
+   ],
+   "panels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ]
+  }
+ ],
+ "videos": [
+  {
+   "kind": "animatic",
+   "path": "/Users/ana/ejemplos/animatica_planos.mp4",
+   "format": "mp4",
+   "codec": "h264",
+   "size": [
+    1280,
+    848
+   ],
+   "fps": 12,
+   "frames": 228,
+   "duration_s": 19.0,
+   "bytes": 549568,
+   "loop": false,
+   "samples": "/Users/ana/ejemplos/animatica_planos_samples.png",
+   "sample_times_s": [
+    1.5,
+    4.5,
+    8.08,
+    12.08,
+    15.08,
+    17.58
+   ]
+  }
+ ],
+ "panels": [
+  {
+   "n": 1,
+   "number": "1",
+   "page": 1,
+   "frame": 20,
+   "time_s": 0.667,
+   "timecode": "0:00:00.7",
+   "pct": 3.5,
+   "sharpness": 1334.9,
+   "sharpness_pct": 46,
+   "shot_in_s": 0.0,
+   "shot_out_s": 3.0,
+   "duration_s": 3.0,
+   "shot_frames": [
+    0,
+    89
+   ],
+   "transition_in": "start",
+   "transition_out": "cut",
+   "video_s": [
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "n": 2,
+   "number": "2",
+   "page": 1,
+   "frame": 138,
+   "time_s": 4.6,
+   "timecode": "0:00:04.6",
+   "pct": 24.3,
+   "sharpness": 2929.3,
+   "sharpness_pct": 100,
+   "shot_in_s": 3.0,
+   "shot_out_s": 6.0,
+   "duration_s": 3.0,
+   "shot_frames": [
+    90,
+    179
+   ],
+   "transition_in": "cut",
+   "transition_out": "dissolve",
+   "transition_out_s": 1.0,
+   "video_s": [
+    3.0,
+    6.0
+   ]
+  },
+  {
+   "n": 3,
+   "number": "3",
+   "page": 1,
+   "frame": 240,
+   "time_s": 8.0,
+   "timecode": "0:00:08.0",
+   "pct": 42.2,
+   "sharpness": 623.7,
+   "sharpness_pct": 21,
+   "shot_in_s": 6.0,
+   "shot_out_s": 10.233,
+   "duration_s": 4.233,
+   "shot_frames": [
+    180,
+    306
+   ],
+   "transition_in": "dissolve",
+   "transition_out": "fade_out",
+   "transition_in_s": 1.0,
+   "transition_out_s": 0.5,
+   "video_s": [
+    6.0,
+    10.233
+   ]
+  },
+  {
+   "n": 4,
+   "number": "4",
+   "page": 1,
+   "frame": 390,
+   "time_s": 13.0,
+   "timecode": "0:00:13.0",
+   "pct": 68.5,
+   "sharpness": 471.8,
+   "sharpness_pct": 16,
+   "shot_in_s": 10.233,
+   "shot_out_s": 14.0,
+   "duration_s": 3.767,
+   "shot_frames": [
+    307,
+    419
+   ],
+   "transition_in": "fade_in",
+   "transition_out": "cut",
+   "transition_in_s": 0.5,
+   "video_s": [
+    10.233,
+    14.0
+   ]
+  },
+  {
+   "n": 5,
+   "number": "5",
+   "page": 1,
+   "frame": 468,
+   "time_s": 15.6,
+   "timecode": "0:00:15.6",
+   "pct": 82.2,
+   "sharpness": 521.7,
+   "sharpness_pct": 18,
+   "shot_in_s": 14.0,
+   "shot_out_s": 16.2,
+   "duration_s": 2.2,
+   "shot_frames": [
+    420,
+    485
+   ],
+   "transition_in": "cut",
+   "transition_out": "dissolve",
+   "transition_out_s": 0.5,
+   "video_s": [
+    14.0,
+    16.2
+   ]
+  },
+  {
+   "n": 6,
+   "number": "6",
+   "page": 1,
+   "frame": 498,
+   "time_s": 16.6,
+   "timecode": "0:00:16.6",
+   "pct": 87.5,
+   "sharpness": 803.1,
+   "sharpness_pct": 27,
+   "shot_in_s": 16.2,
+   "shot_out_s": 19.0,
+   "duration_s": 2.8,
+   "shot_frames": [
+    486,
+    569
+   ],
+   "transition_in": "dissolve",
+   "transition_out": "fade_out",
+   "transition_in_s": 0.5,
+   "transition_out_s": 1.0,
+   "video_s": [
+    16.2,
+    19.0
+   ]
+  }
+ ],
+ "dropped": [],
+ "selection": {
+  "mode": "shots",
+  "range_s": [
+   0.0,
+   18.97
+  ],
+  "range_pct": [
+   0.0,
+   100.0
+  ],
+  "measured": 570,
+  "threshold": 0.0,
+  "sharpness_stats": {
+   "min": 0.0,
+   "p25": 457.4,
+   "median": 608.2,
+   "p75": 1220.2,
+   "max": 2929.3
+  },
+  "shots": {
+   "found": 6,
+   "cuts": 2,
+   "fades": 1,
+   "dissolves": 2,
+   "threshold": 20.0,
+   "min_shot_s": 0.4
+  }
+ },
+ "layout": {
+  "template": "grid",
+  "columns": 4,
+  "rows_per_page": 2,
+  "picture_size": [
+   480,
+   270
+  ],
+  "page": "auto",
+  "page_size": [
+   1920,
+   732
+  ],
+  "theme": "dark"
+ },
+ "input": {
+  "kind": "video",
+  "video": {
+   "path": "/Users/ana/ejemplos/planos.mp4",
+   "duration_s": 19.0,
+   "fps": 30.0,
+   "frames": 570,
+   "size": [
+    640,
+    360
+   ],
+   "rotation_deg": 0,
+   "displayed_size": [
+    640,
+    360
+   ],
+   "codec": "mpeg4"
+  }
+ },
+ "warnings": []
+}
