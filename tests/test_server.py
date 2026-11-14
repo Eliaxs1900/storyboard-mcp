@@ -518,7 +518,7 @@ def test_color_script(photos, tmp_path):
     assert len(extra) == 2                                   # page 1 and the colour script
 
 
-def test_animation_errors_and_limits(video, photos):
+def test_animation_errors_and_limits(video, photos, tmp_path):
     e = err("make_storyboard", {"input": {"folder": str(photos)},
                                 "output": {"format": "gif", "animation": {"kind": "mosaic"}}})
     assert 'output.animation.kind: "mosaic" needs a video' in e and '"animatic"' in e
@@ -529,12 +529,16 @@ def test_animation_errors_and_limits(video, photos):
     assert "output.animation: only used with an animated output.format" in e
     e = err("make_storyboard", {"input": {"video": str(video)}, "output": {"format": "mp4", "animation": {"fps": 60}}})
     assert "output.animation.fps: Input should be less than or equal to 30 (got 60)" in e
+    nowhere = tmp_path / "nothing_written"
     e = err("make_storyboard", {"input": {"video": str(video)}, "select": {"count": 6},
-                                "output": {"format": "mp4", "animation": {"kind": "animatic", "panel_s": 60}}})
+                                "output": {"dir": str(nowhere), "format": "mp4",
+                                           "animation": {"kind": "animatic", "panel_s": 60}}})
     assert "the animatic would last 360 s" in e and "limit is 300 s" in e
     e = err("make_storyboard", {"input": {"video": str(video)},
-                                "output": {"format": "mp4", "animation": {"fps": 30, "duration_s": 150}}})
+                                "output": {"dir": str(nowhere), "format": "mp4",
+                                           "animation": {"fps": 30, "duration_s": 150}}})
     assert "4500 frames" in e and "limit is 3600" in e
+    assert not nowhere.exists()                      # the limits are checked before writing anything
     e = err("make_storyboard", {"input": {"video": str(video)}, "layout": {"label": {"fields": ["duration"]}}})
     assert 'layout.label.fields[0]: "duration" needs select.mode "shots"' in e
     e = err("make_storyboard", {"input": {"folder": str(photos)}, "select": {"mode": "shots"}})

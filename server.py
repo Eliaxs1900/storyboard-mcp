@@ -2746,18 +2746,36 @@ def _decode_width(src: "VideoSource", w: int, h: int) -> int:
     return max(16, min(src.info.size[0], round(src.info.size[0] * s) + 2))
 
 
+def _mosaic_loop(picks: list[Pick], end: float, A: AnimationSpec) -> tuple[list[tuple[float, float]], float, int]:
+    """Each panel's part of the video, and the loop: (spans, seconds, frames)."""
+    spans = _spans(picks, end)
+    D = A.duration_s or min(8.0, max(1.0, max(b - a for a, b in spans)))
+    return spans, D, max(1, round(D * A.fps))
+
+
+def check_video(kind: str, picks: list[Pick], end: float, O: StoryboardOutput, pages: int):
+    """The limits of an animated output, checked before anything is written."""
+    A = O.animation
+    if kind == "mosaic":
+        _check_frames(_mosaic_loop(picks, end, A)[2], A.fps, "output.animation.duration_s")
+        if pages > MAX_VIDEOS:
+            raise ToolError(f"output.format: a mosaic is one video per page and there would be {pages} pages; the "
+                            f"limit is {MAX_VIDEOS}. Use layout.page \"auto\" (one page) or fewer panels")
+        return
+    total = animatic_timeline(picks, A, loop=O.format in ("gif", "webp"))[1]
+    if total > MAX_VIDEO_S:
+        raise ToolError(f"output.animation.duration_s: the animatic would last {total:.0f} s (the sum of the panel "
+                        f"durations); the limit is {MAX_VIDEO_S} s. Give output.animation.duration_s to scale it "
+                        "down, or use fewer panels or a shorter panel_s")
+    _check_frames(max(1, round(total * A.fps)), A.fps, "output.animation")
+
+
 def make_mosaic(src, picks: list[Pick], end: float, parts: list, geo: Geo, look: Look, L: LayoutSpec,
                 O: StoryboardOutput, name: str, out_dir: Path, strings: dict):
     """The pages with every panel playing its part of the video at once. Returns (videos, {panel
     index: (clip [start, end], speed)})."""
     A, fps = O.animation, O.animation.fps
-    spans = _spans(picks, end)
-    D = A.duration_s or min(8.0, max(1.0, max(b - a for a, b in spans)))
-    F = max(1, round(D * fps))
-    _check_frames(F, fps, "output.animation.duration_s")
-    if len(parts) > MAX_VIDEOS:
-        raise ToolError(f"output.format: a mosaic is one video per page and there would be {len(parts)} pages; the "
-                        f"limit is {MAX_VIDEOS}. Use layout.page \"auto\" (one page) or fewer panels")
+    spans, D, F = _mosaic_loop(picks, end, A)
     side = A.max_side or DEFAULT_SIDE[O.format]
     bg = _rgb(look.bg) + (255,)
     clips: dict[int, tuple[list[float], float]] = {}
@@ -2912,13 +2930,8 @@ def make_animatic(picks: list[Pick], views: list[View], card_pics: dict[int, byt
     """The panels one after another, each drawn as a card (the page template, one panel), with its
     duration and its cut, fade or dissolve."""
     A, fps = O.animation, O.animation.fps
-    slots, total, scale = animatic_timeline(picks, A, loop=O.format in ("gif", "webp"))
-    if total > MAX_VIDEO_S:
-        raise ToolError(f"output.animation.duration_s: the animatic would last {total:.0f} s (the sum of the panel "
-                        f"durations); the limit is {MAX_VIDEO_S} s. Give output.animation.duration_s to scale it "
-                        "down, or use fewer panels or a shorter panel_s")
+    slots, total, scale = animatic_timeline(picks, A, loop=O.format in ("gif", "webp"))   # limits: check_video
     F = max(1, round(total * fps))
-    _check_frames(F, fps, "output.animation")
     geo, lk, Lc, lines, (cw, ch) = card
     side = A.max_side or DEFAULT_SIDE[O.format]
     s = min(1.0, side / max(cw, ch))
@@ -3290,6 +3303,8 @@ def tool_make_storyboard(args: StoryboardArgs):
     pages_n = math.ceil(len(picks) / per_page)
     if pages_n > MAX_PAGES:
         raise ToolError(f"{pages_n} pages; the limit is {MAX_PAGES}. Use more layout.rows or columns, or fewer panels")
+    if kind:                                 # nothing is written if the video would be too long or too big
+        check_video(kind, picks, chosen.range_s[1] if chosen.range_s else 0.0, O, pages_n)
     card = card_notes = None
     if kind == "animatic":                   # the cards are planned first: pictures are made once, at their size
         card_on = L.notes.show if L.notes.show is not None else has_notes
