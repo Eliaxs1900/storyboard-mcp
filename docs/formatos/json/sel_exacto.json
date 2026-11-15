@@ -143,6 +143,6 @@
   }
  },
  "warnings": [
-  "select: panel(s) 1, 2, 3 look blurred (sharpness under half the sharpest panel's); add snap_s (e.g. 0.5) to use a sharp frame nearby, or move the positions (start_s)"
+  "select: panel(s) 1, 2, 3 look blurred (sharpness under half the sharpest panel's, or the sharpest frame within 0.5 s); add snap_s (e.g. 0.5) to use the nearest sharp frame, or move the positions (start_s)"
  ]
 }

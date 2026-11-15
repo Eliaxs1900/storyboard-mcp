@@ -33,12 +33,12 @@
    "n": 2,
    "number": "2",
    "page": 1,
-   "frame": 109,
-   "time_s": 3.633,
-   "timecode": "0:00:03.6",
-   "pct": 18.2,
-   "sharpness": 2923.3,
-   "sharpness_pct": 90
+   "frame": 119,
+   "time_s": 3.967,
+   "timecode": "0:00:04.0",
+   "pct": 19.9,
+   "sharpness": 2863.5,
+   "sharpness_pct": 88
   },
   {
    "n": 3,
@@ -141,5 +141,7 @@
    "codec": "mpeg4"
   }
  },
- "warnings": []
+ "warnings": [
+  "select.snap_s: 2 position(s) were on blurred frames and moved to the nearest sharp one: 0.00 → 0.50 s, 3.99 → 3.97 s"
+ ]
 }

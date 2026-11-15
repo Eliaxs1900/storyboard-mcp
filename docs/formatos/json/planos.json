@@ -1,0 +1,350 @@
+{
+ "pages": [
+  {
+   "page": 1,
+   "path": "/Users/ana/ejemplos/planos.png",
+   "size": [
+    960,
+    474
+   ],
+   "panels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ]
+  }
+ ],
+ "shot_list": {
+  "json": "/Users/ana/ejemplos/planos_shots.json",
+  "csv": "/Users/ana/ejemplos/planos_shots.csv"
+ },
+ "color_script": "/Users/ana/ejemplos/planos_colors.png",
+ "panels": [
+  {
+   "n": 1,
+   "number": "1",
+   "page": 1,
+   "frame": 20,
+   "time_s": 0.667,
+   "timecode": "0:00:00.7",
+   "pct": 3.5,
+   "sharpness": 1334.9,
+   "sharpness_pct": 46,
+   "shot_in_s": 0.0,
+   "shot_out_s": 3.0,
+   "duration_s": 3.0,
+   "shot_frames": [
+    0,
+    89
+   ],
+   "transition_in": "start",
+   "transition_out": "cut",
+   "colors": [
+    {
+     "hex": "#192031",
+     "pct": 29.7
+    },
+    {
+     "hex": "#6e9aef",
+     "pct": 23.0
+    },
+    {
+     "hex": "#5083ee",
+     "pct": 19.5
+    },
+    {
+     "hex": "#346ce9",
+     "pct": 18.4
+    },
+    {
+     "hex": "#91b6f3",
+     "pct": 9.5
+    }
+   ]
+  },
+  {
+   "n": 2,
+   "number": "2",
+   "page": 1,
+   "frame": 138,
+   "time_s": 4.6,
+   "timecode": "0:00:04.6",
+   "pct": 24.3,
+   "sharpness": 2929.3,
+   "sharpness_pct": 100,
+   "shot_in_s": 3.0,
+   "shot_out_s": 6.0,
+   "duration_s": 3.0,
+   "shot_frames": [
+    90,
+    179
+   ],
+   "transition_in": "cut",
+   "transition_out": "dissolve",
+   "transition_out_s": 1.0,
+   "colors": [
+    {
+     "hex": "#0b4b8a",
+     "pct": 31.4
+    },
+    {
+     "hex": "#0b6bb1",
+     "pct": 27.4
+    },
+    {
+     "hex": "#0d8dd8",
+     "pct": 22.0
+    },
+    {
+     "hex": "#5ba7d0",
+     "pct": 11.8
+    },
+    {
+     "hex": "#142430",
+     "pct": 7.4
+    }
+   ]
+  },
+  {
+   "n": 3,
+   "number": "3",
+   "page": 1,
+   "frame": 240,
+   "time_s": 8.0,
+   "timecode": "0:00:08.0",
+   "pct": 42.2,
+   "sharpness": 623.7,
+   "sharpness_pct": 21,
+   "shot_in_s": 6.0,
+   "shot_out_s": 10.233,
+   "duration_s": 4.233,
+   "shot_frames": [
+    180,
+    306
+   ],
+   "transition_in": "dissolve",
+   "transition_out": "fade_out",
+   "transition_in_s": 1.0,
+   "transition_out_s": 0.5,
+   "colors": [
+    {
+     "hex": "#965a33",
+     "pct": 59.1
+    },
+    {
+     "hex": "#49291b",
+     "pct": 28.8
+    },
+    {
+     "hex": "#e3d8b2",
+     "pct": 9.4
+    },
+    {
+     "hex": "#7d563a",
+     "pct": 1.5
+    },
+    {
+     "hex": "#c51f1e",
+     "pct": 1.3
+    }
+   ]
+  },
+  {
+   "n": 4,
+   "number": "4",
+   "page": 1,
+   "frame": 390,
+   "time_s": 13.0,
+   "timecode": "0:00:13.0",
+   "pct": 68.5,
+   "sharpness": 471.8,
+   "sharpness_pct": 16,
+   "shot_in_s": 10.233,
+   "shot_out_s": 14.0,
+   "duration_s": 3.767,
+   "shot_frames": [
+    307,
+    419
+   ],
+   "transition_in": "fade_in",
+   "transition_out": "cut",
+   "transition_in_s": 0.5,
+   "colors": [
+    {
+     "hex": "#1e4f28",
+     "pct": 35.8
+    },
+    {
+     "hex": "#593915",
+     "pct": 33.3
+    },
+    {
+     "hex": "#3f3b17",
+     "pct": 23.4
+    },
+    {
+     "hex": "#131411",
+     "pct": 6.8
+    },
+    {
+     "hex": "#acaa9c",
+     "pct": 0.8
+    }
+   ]
+  },
+  {
+   "n": 5,
+   "number": "5",
+   "page": 1,
+   "frame": 468,
+   "time_s": 15.6,
+   "timecode": "0:00:15.6",
+   "pct": 82.2,
+   "sharpness": 521.7,
+   "sharpness_pct": 18,
+   "shot_in_s": 14.0,
+   "shot_out_s": 16.2,
+   "duration_s": 2.2,
+   "shot_frames": [
+    420,
+    485
+   ],
+   "transition_in": "cut",
+   "transition_out": "dissolve",
+   "transition_out_s": 0.5,
+   "colors": [
+    {
+     "hex": "#080a1a",
+     "pct": 89.5
+    },
+    {
+     "hex": "#0e0f14",
+     "pct": 6.1
+    },
+    {
+     "hex": "#ecda9e",
+     "pct": 2.0
+    },
+    {
+     "hex": "#07080f",
+     "pct": 1.4
+    },
+    {
+     "hex": "#736c53",
+     "pct": 1.0
+    }
+   ]
+  },
+  {
+   "n": 6,
+   "number": "6",
+   "page": 1,
+   "frame": 498,
+   "time_s": 16.6,
+   "timecode": "0:00:16.6",
+   "pct": 87.5,
+   "sharpness": 803.1,
+   "sharpness_pct": 27,
+   "shot_in_s": 16.2,
+   "shot_out_s": 19.0,
+   "duration_s": 2.8,
+   "shot_frames": [
+    486,
+    569
+   ],
+   "transition_in": "dissolve",
+   "transition_out": "fade_out",
+   "transition_in_s": 0.5,
+   "transition_out_s": 1.0,
+   "colors": [
+    {
+     "hex": "#000000",
+     "pct": 88.4
+    },
+    {
+     "hex": "#0c0b0f",
+     "pct": 7.3
+    },
+    {
+     "hex": "#f3f3f3",
+     "pct": 2.2
+    },
+    {
+     "hex": "#a09e98",
+     "pct": 1.1
+    },
+    {
+     "hex": "#504c3e",
+     "pct": 1.0
+    }
+   ]
+  }
+ ],
+ "dropped": [],
+ "selection": {
+  "mode": "shots",
+  "range_s": [
+   0.0,
+   18.97
+  ],
+  "range_pct": [
+   0.0,
+   100.0
+  ],
+  "measured": 570,
+  "threshold": 0.0,
+  "sharpness_stats": {
+   "min": 0.0,
+   "p25": 457.4,
+   "median": 608.2,
+   "p75": 1220.2,
+   "max": 2929.3
+  },
+  "shots": {
+   "found": 6,
+   "cuts": 2,
+   "fades": 1,
+   "dissolves": 2,
+   "threshold": 20.0,
+   "min_shot_s": 0.4
+  }
+ },
+ "layout": {
+  "template": "grid",
+  "columns": 3,
+  "rows_per_page": 2,
+  "picture_size": [
+   320,
+   180
+  ],
+  "page": "auto",
+  "page_size": [
+   960,
+   474
+  ],
+  "theme": "dark"
+ },
+ "input": {
+  "kind": "video",
+  "video": {
+   "path": "/Users/ana/ejemplos/planos.mp4",
+   "duration_s": 19.0,
+   "fps": 30.0,
+   "frames": 570,
+   "size": [
+    640,
+    360
+   ],
+   "rotation_deg": 0,
+   "displayed_size": [
+    640,
+    360
+   ],
+   "codec": "mpeg4"
+  }
+ },
+ "warnings": []
+}
